@@ -48,6 +48,24 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
   }
   root.updateMatrixWorld(true);
 
+  // --- hinge-axis alignment: twist each digit's distal joints about their bone axes
+  // (local Z) so every hinge (local X) parallels its root joint's — the GLB's axes
+  // splay a few degrees per joint (thumb ~40°), which breaks the shared-axis planar
+  // model (constant tip residual with no limit binding). Bone-axis twists barely
+  // change the silhouette. ---
+  const colW = (o, i) => new THREE.Vector3().setFromMatrixColumn(o.matrixWorld, i).normalize();
+  const boneZ = new THREE.Vector3(0, 0, 1);
+  for (const f of FINGERS) {
+    const rootJ = byName[f === 'thumb' ? 'thumb-metacarpal' : `${jointPrefix(f)}-phalanx-proximal`];
+    for (const n of chainNames(f)) {
+      const j = byName[n];
+      if (!j || j === rootJ || n.endsWith('-tip') || n.endsWith('-metacarpal')) continue;
+      const ax = colW(rootJ, 0);
+      j.rotateOnAxis(boneZ, Math.atan2(ax.dot(colW(j, 1)), ax.dot(colW(j, 0))));
+      root.updateMatrixWorld(true);
+    }
+  }
+
   // --- per-digit geometry (root-local = world here, root still identity pre-mount) ---
   // axisW = the MCP joint's world-X (curl-test confirmed local X is the flexion axis,
   // ~-Z lateral for the four fingers; thumb differs as it's opposed). All joints of a
@@ -94,7 +112,28 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
       isThumb: isTh,
       slave: isTh ? C.THUMB_SLAVE : C.DIP_SLAVE,
       yawMax: isTh ? C.YAW_MAX_THUMB : C.YAW_MAX_FINGER,
+      mcpMin: isTh ? C.THUMB_CMC_EXT : C.LIMITS[0][0],
     };
+  }
+
+  // --- per-digit curl sign: positive curl must sweep the tip toward the PALM (the
+  // GLB's +localX rotation is anatomical EXTENSION). Palm side = side of the palm
+  // plane (wrist, indexMCP, pinkyMCP) holding the thumb column. Applied by negating
+  // axisW (and its outs); applyCurl mirrors the sign onto the joint rotations. ---
+  {
+    const wl = wrist.getWorldPosition(new THREE.Vector3());
+    const n = new THREE.Vector3().crossVectors(
+      digits.index.pos.mcp.clone().sub(wl), digits.pinky.pos.mcp.clone().sub(wl)).normalize();
+    const palmN = n.multiplyScalar(Math.sign(digits.thumb.pos.pip.clone().sub(wl).dot(n)));
+    for (const f of FINGERS) {
+      const d = digits[f];
+      const motion = new THREE.Vector3().crossVectors(d.axisW, d.pos.tip.clone().sub(d.pos.mcp));
+      d.curlSign = motion.dot(palmN) > 0 ? 1 : -1;
+      if (d.curlSign < 0) {
+        d.axisW.negate();
+        d.out0 = -d.out0; d.out1 = -d.out1; d.out2 = -d.out2;
+      }
+    }
   }
 
   // --- scale so middle-finger reach (MCP→tip) = 1 world unit ---
@@ -109,12 +148,16 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
   const WORLD_M = middleReach;                          // meters per world unit (1u ≈ middle reach)
   const G = C.G_SI / WORLD_M;                            // fierce gravity (u/s^2)
 
-  // --- mount into the "Thing" stance: bind -Y(fingers)→+X(forward), +X(knuckles)→+Y(up) ---
-  // Rz(+90°): (x,y)->(-y,x). Handedness handled by mirroring rotation direction.
+  // --- mount into the "Thing" stance: bind -Y(fingers)→+X(forward), and bind +X is
+  // the PALM (thumb-side-of-palm-plane verified), which must face DOWN (-Y world):
+  // R = Ry(π)·Rz(∓π/2). A bare Rz(+90°) reads the palm as the knuckle dome and stands
+  // the hand palm-to-the-sky on hyperextended fingers — self-consistently, so only
+  // the mesh betrays it. Handedness mirrors the Rz direction.
   const mount = new THREE.Group();
   mount.name = 'ThingMount';
   root.scale.setScalar(scale);
-  root.rotation.set(0, 0, handedness < 0 ? Math.PI / 2 : -Math.PI / 2);
+  root.rotation.order = 'YZX';
+  root.rotation.set(0, Math.PI, handedness < 0 ? -Math.PI / 2 : Math.PI / 2);
   mount.add(root);
   root.updateMatrixWorld(true);
   // recenter: the WRIST is the body origin ("wrist high" is literal — body height =
@@ -139,6 +182,7 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
     const recapture = () => {
       d.pos = { meta: null, mcp: posL(d.mcp), pip: posL(d.pip), dip: posL(d.dip), tip: posL(d.tip) };
       d.axisW = dirL(d.mcp, 0); d.abdW = dirL(d.mcp, 1);
+      if (d.curlSign < 0) d.axisW.negate();
       const b0 = d.pos.pip.clone().sub(d.pos.mcp), b1 = d.pos.dip.clone().sub(d.pos.pip),
         b2 = d.pos.tip.clone().sub(d.pos.dip);
       d.out0 = b0.dot(d.axisW); d.out1 = b1.dot(d.axisW); d.out2 = b2.dot(d.axisW);
@@ -169,8 +213,10 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
     const mcpW0 = d.mcp.getWorldPosition(new THREE.Vector3());
     const tipW0 = d.tip.getWorldPosition(new THREE.Vector3());
     const lane = new THREE.Vector3(tipW0.x - mcpW0.x, 0, tipW0.z - mcpW0.z).normalize();
-    let bestPhi = 0, bestErr = Infinity;
+    let bestPhi = 0, bestErr = Infinity, bestReach = 0;
+    const scanCurve = [];
     const tmp = new THREE.Vector3();
+    const UP = new THREE.Vector3(0, 1, 0);
     for (let phi = -1.2; phi <= 1.2 + 1e-9; phi += 0.05) {
       for (const j of [d.mcp, d.pip, d.dip, d.tip]) j.quaternion.copy(q0[j.name]);
       d.mcp.rotateOnAxis(boneZ, phi);
@@ -181,15 +227,27 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
       const drop = mcpW.y - 0.012, ext = C.REST_EXT * d.reachW;
       if (ext <= Math.abs(drop)) continue;
       const fwd = Math.max(Math.sqrt(ext * ext - drop * drop), C.REST_MIN_FWD * d.reachW);
-      const foot = new THREE.Vector3(mcpW.x + lane.x * fwd, 0.012, mcpW.z + lane.z * fwd);
-      solveLeg(d, root.worldToLocal(foot.clone()), { root });
-      const err = d.tip.getWorldPosition(tmp).distanceTo(foot);
-      // prefer passing angles nearest 0; otherwise track the best miss
-      const better = (err < C.BAND_TIP_ERR && bestErr >= C.BAND_TIP_ERR)
-        || (err < C.BAND_TIP_ERR) === (bestErr < C.BAND_TIP_ERR)
-        && (err < C.BAND_TIP_ERR ? Math.abs(phi) < Math.abs(bestPhi) : err < bestErr);
-      if (better) { bestPhi = phi; bestErr = err; }
+      // best err over the SAME lane-angle sweep calibrate() refines with (±1.0 rad) —
+      // a narrower probe under-rates candidates whose lane sits wide of bind
+      let err = Infinity;
+      for (let a = -1.0; a <= 1.0 + 1e-9; a += 0.05) {
+        const dir = lane.clone().applyAxisAngle(UP, a);
+        const foot = new THREE.Vector3(mcpW.x + dir.x * fwd, 0.012, mcpW.z + dir.z * fwd);
+        d.yaw = 0;
+        solveLeg(d, root.worldToLocal(foot.clone()), { root });
+        err = Math.min(err, d.tip.getWorldPosition(tmp).distanceTo(foot));
+      }
+      scanCurve.push({ phi: +phi.toFixed(2), err: +err.toFixed(4), reach: +d.reachW.toFixed(3) });
+      // among PASSING candidates keep the largest post-bake reach — alignment twists
+      // can collapse the tip toward the CMC, and a short thumb can't descend to any
+      // stance rest (restsAt nulls every height). Otherwise track the best miss.
+      const passing = err < C.BAND_TIP_ERR;
+      const better = passing
+        ? (bestErr >= C.BAND_TIP_ERR || d.reachW > bestReach)
+        : (bestErr >= C.BAND_TIP_ERR && err < bestErr);
+      if (better) { bestPhi = phi; bestErr = err; bestReach = d.reachW; }
     }
+    d.pronationScan = scanCurve;
     for (const j of [d.mcp, d.pip, d.dip, d.tip]) j.quaternion.copy(q0[j.name]);
     d.mcp.rotateOnAxis(boneZ, bestPhi);
     mount.updateMatrixWorld(true);

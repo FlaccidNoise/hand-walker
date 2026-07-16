@@ -17,11 +17,12 @@ export function resetToBind(d) {
 // (post-multiply) rotation; every joint hinges about the same axisW, so accumulating
 // local-X rotations == the analytic in-plane curl (in the yawed plane).
 export function applyCurl(d, a) {
+  const cs = d.curlSign ?? 1;                                // + curl = toward the palm
   resetToBind(d);
   if (a.yaw) d.mcp.rotateOnAxis(_Y, a.yaw);
-  if (a.mcp) d.mcp.rotateOnAxis(_X, a.mcp);
-  if (d.pip && a.pip) d.pip.rotateOnAxis(_X, a.pip);
-  if (a.dip) d.dip.rotateOnAxis(_X, a.dip);
+  if (a.mcp) d.mcp.rotateOnAxis(_X, cs * a.mcp);
+  if (d.pip && a.pip) d.pip.rotateOnAxis(_X, cs * a.pip);
+  if (a.dip) d.dip.rotateOnAxis(_X, cs * a.dip);
 }
 const _X = new THREE.Vector3(1, 0, 0);
 const _Y = new THREE.Vector3(0, 1, 0);
@@ -111,7 +112,7 @@ export function solveLeg(d, target, opts = {}) {
   };
   const mk = (s) => {
     const a = solveBranch(s);
-    a.mcp = M.clamp(a.mcp, C.LIMITS[0][0], C.LIMITS[0][1]);
+    a.mcp = M.clamp(a.mcp, d.mcpMin ?? C.LIMITS[0][0], C.LIMITS[0][1]);
     a.pip = M.clamp(a.pip, C.LIMITS[1][0], C.LIMITS[1][1]);
     a.dip = M.clamp(d.slave * a.pip, C.LIMITS[2][0], C.LIMITS[2][1]); // DIP follows the CLAMPED pip
     return a;

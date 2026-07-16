@@ -29,6 +29,7 @@ export const LIMITS = [
 // --- Reach / step geometry ---
 export const DIP_SLAVE = 0.62;        // DIP anatomically slaved to PIP (~0.62·) (§4.2)
 export const THUMB_SLAVE = 0.5;       // thumb IP slaved to its MCP flexion (CMC-rooted chain)
+export const THUMB_CMC_EXT = -0.9;    // CMC extension range (~50°) — LIMITS[0] is finger-MCP anatomy
 // MCP ab/adduction yaw (§4.2): anatomical range (§7: fingers ±0.3, thumb ±0.65),
 // faded out near the knuckle where the lever shrinks (|t|/reach between LO and HI).
 export const YAW_MAX_FINGER = 0.3;
@@ -61,8 +62,11 @@ export const V_MOVE = 0.15;
 // ALOFT in trot/run — its band can't service them. Phase offsets keep spatially
 // adjacent digits ≥PHASE_SEP apart (walk ripple: every neighbour pair 0.4 apart). ---
 export const GAITS = {
-  walk: { duty: 0.78, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: [],
-          offsets: { index: 0.0, ring: 0.2, thumb: 0.4, middle: 0.6, pinky: 0.8 } },
+  // thumb aloft in ALL moving gaits: with palm-down flexion its forward band at walk
+  // height is a sliver (~0.05) — the spec's own rule ("its band can't service trot")
+  // applies to our walk too. It plants at rest below V_MOVE (the standing Thing look).
+  walk: { duty: 0.78, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: ['thumb'],
+          offsets: { index: 0.0, ring: 0.25, middle: 0.5, pinky: 0.75, thumb: 0.4 } },
   trot: { duty: 0.62, fMax: 5.5, arcH: 0.22, vCap: 2.1, aloft: ['thumb'],
           offsets: { index: 0.0, ring: 0.0, middle: 0.5, pinky: 0.5, thumb: 0.25 } },
   run:  { duty: 0.50, fMax: 7.0, arcH: 0.24, vCap: Infinity, aloft: ['thumb'],
