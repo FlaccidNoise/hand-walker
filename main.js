@@ -6,6 +6,7 @@ import { buildRig, FINGERS } from './src/rig.js';
 import { solveLeg, applyCurl, resetToBind, tipLocal, groundConstrain, padHeight, foldAnnulus } from './src/ik.js';
 import { groundY } from './src/terrain.js';
 import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
+import { makeBrain } from './src/brain.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import * as C from './src/tuning.js';
@@ -45,11 +46,12 @@ async function init() {
 
   const sim = makeSim(rig, calib);
   sim.reset();
+  const brain = makeBrain(sim, rig, camera);
 
   const __hand = {
     rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES,
-    solveLeg, resetToBind, tipLocal, state, calib, sim,
-    reset: (...a) => sim.reset(...a),
+    solveLeg, resetToBind, tipLocal, state, calib, sim, brain,
+    reset: (...a) => { brain.stop(); sim.reset(...a); },
     autoWalk: (x, z) => sim.autoWalk(x, z),
     jump: () => sim.jump(),
     gesture: (name) => sim.gesture(name),
@@ -57,30 +59,50 @@ async function init() {
   };
   window.__hand = __hand;
 
-  // keyboard: ` debug overlay · p pause · r reset · WASD walk · Space jump · 1-0 gestures
-  const keyVel = { w: [1, 0], s: [-1, 0], a: [0, -1], d: [0, 1] };
-  const gestureKeys = { '1': 'yes', '2': 'no', '3': 'idk', '4': 'wave', '5': 'laugh',
-    '6': 'bow', '7': 'point', '8': 'beckon', '9': 'thinking', '0': 'tap' };
-  const down = new Set();
-  const applyKeys = () => {
-    let x = 0, z = 0;
-    for (const k of down) if (keyVel[k]) { x += keyVel[k][0]; z += keyVel[k][1]; }
-    const l = Math.hypot(x, z);
-    sim.autoWalk(l ? x / l : 0, l ? z / l : 0);
-  };
+  // keyboard: dev keys only — direct control removed, the brain drives (Phase A)
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; }
     if (k === 'p') state.paused = !state.paused;
-    if (k === 'r') sim.reset();
-    if (k === ' ') sim.jump();
-    if (gestureKeys[k]) sim.gesture(gestureKeys[k]);
-    if (keyVel[k]) { down.add(k); applyKeys(); }
+    if (k === 'r') { brain.stop(); sim.reset(); }
   });
-  addEventListener('keyup', (e) => {
-    const k = e.key.toLowerCase();
-    if (keyVel[k]) { down.delete(k); applyKeys(); }
+
+  // talk UI: hold Space = push-to-talk (Web Speech STT), or type a command
+  const talkState = document.getElementById('talkState');
+  const talkText = document.getElementById('talkText');
+  const setTalk = (msg, err = false) => { talkState.textContent = msg; talkState.className = err ? 'err' : ''; };
+  brain.st.onstatus = (st) =>
+    setTalk(st.status === 'idle' ? 'hold SPACE to talk' : `${st.status} ${st.detail}`, st.status === 'error');
+  talkText.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter' && talkText.value.trim()) { brain.ask(talkText.value.trim()); talkText.value = ''; }
   });
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) setTalk('no speech recognition in this browser — type a command below', true);
+  else {
+    let rec = null, transcript = '', micErr = false;
+    addEventListener('keydown', (e) => {
+      if (e.code !== 'Space' || e.repeat || e.target === talkText || rec) return;
+      e.preventDefault();
+      transcript = ''; micErr = false;
+      rec = new SR();
+      rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true;
+      rec.onresult = (ev) => {
+        transcript = [...ev.results].map(r => r[0].transcript).join(' ').trim();
+        setTalk(`listening: ${transcript || '…'}`);
+      };
+      rec.onerror = (ev) => { micErr = true; setTalk(`mic error: ${ev.error}`, true); };
+      rec.onend = () => {
+        if (transcript) brain.ask(transcript);
+        else if (!micErr && brain.st.status === 'idle') setTalk('hold SPACE to talk');
+      };
+      rec.start();
+      setTalk('listening: …');
+    });
+    addEventListener('keyup', (e) => {
+      if (e.code === 'Space' && rec) { rec.stop(); rec = null; }
+    });
+  }
 
   controls.target.set(0, calib.standH, 0);
   camera.position.set(1.4, 0.9 + calib.standH, 2.6);
@@ -91,7 +113,10 @@ async function init() {
   function loop() {
     requestAnimationFrame(loop);
     const dt = Math.min(clock.getDelta(), 1 / 30);
-    if (!state.paused) sim.step(dt * C.TIME_SCALE);          // TIME_SCALE slows the clock (§4.8)
+    if (!state.paused) {
+      sim.step(dt * C.TIME_SCALE);                           // TIME_SCALE slows the clock (§4.8)
+      brain.tick(dt * C.TIME_SCALE);
+    }
     controls.target.lerp(new THREE.Vector3(
       rig.mount.position.x, calib.standH, rig.mount.position.z), 0.08);
     controls.update();
@@ -99,7 +124,7 @@ async function init() {
     if (state.debug) drawDebug(dbg, rig, sim);
     frames++; fpsT += dt;
     if (fpsT > 0.5) {
-      hud.innerHTML = devHUD(frames / fpsT, rig, sim, calib);
+      hud.innerHTML = devHUD(frames / fpsT, rig, sim, calib, brain);
       frames = 0; fpsT = 0;
     }
   }
@@ -768,7 +793,7 @@ function calibrate(rig) {
     laneDir, restExt, restsAt, scanBand, solveTo, setPose, bellyFloor };
 }
 
-function devHUD(fps, rig, sim, calib) {
+function devHUD(fps, rig, sim, calib, brain) {
   const s = sim.s;
   const lines = [
     `<b>Hand Walker</b>  fps ${fps.toFixed(0)}  ${state.paused ? '<b>PAUSED</b>' : ''}`,
@@ -779,7 +804,8 @@ function devHUD(fps, rig, sim, calib) {
       return `${f.padEnd(6)} ${l.mode.padEnd(6)} err ${l.err.toFixed(3)}`;
     }),
     s.gesture ? `<b>${s.gesture.idle ? 'idle' : 'gesture'}</b> ${s.gesture.name} t ${s.gesture.t.toFixed(2)}/${s.gesture.dur}` : '',
-    `WASD walk · Space jump · R reset · \` debug · 1-0 gestures`,
+    brain.st.status !== 'idle' ? `<b>brain</b> ${brain.st.status} ${brain.st.detail}` : '',
+    `R reset · \` debug · P pause`,
   ];
   return lines.join('\n');
 }
