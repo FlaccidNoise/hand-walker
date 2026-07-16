@@ -1,77 +1,82 @@
-# Handoff — Gestures: Yes / No / I-don't-know
+# Handoff — Gesture Vocabulary Expansion + Idle Animations
 
 **Date:** 2026-07-16
 **Project:** hand-walker (`/Users/joshtaylor/CodingProjects/hand-walker`)
 
 ## Current Task
-Add three expressive gestures to the walking severed hand ("Thing"): **Yes** (nod), **No**
-(head-shake or index-finger wag), **I-don't-know** (shrug). These are the first bricks of
-the end goal: an interactive buddy driven by STT→LLM→TTS that gestures and follows
-commands. Locomotion is polished and stays untouched except where gestures layer on top.
+Expand the gesture vocabulary toward an interactive buddy (STT→LLM→TTS brain, later
+session). New gestures wanted: **wave, laugh, bow, point, beckon, thinking, tap
+(impatient)** — plus **idle animations** that play when not interacted with. Aim for
+near-full versatility of a human hand; the gesture engine is the substrate.
 
-## Completed (locomotion is in good shape — don't re-litigate)
-- **Gesture engine + yes/no/idk** (this session): `s.gesture={name,t,dur}` advanced in
-  step(), `__hand.gesture('yes'|'no'|'idk')` + keys 1/2/3, blocked while airborne or
-  speed > V_MOVE. Yes = body-pitch bob ×2 (YES_PITCH_AMP 0.16). No = index-finger wag
-  (lift to pip 0.5, yaw ±0.28 ×3 via poseLeg, replant via real swing) — the heading-
-  wiggle variant was A/B-refuted (see Key Decisions). IDK = rise +0.08 through the
-  ride-height spring, pitch back 0.08, index+pinky sepBias splay. All verified: tip
-  continuity ≤0.073/frame (swing-normal), snap.mjs visual, unit+calib+qa gates hold.
-- Full gait stack: calibrated stance (standH 0.886 tip-toe), walk/trot/run, jumps,
-  turning, thumb walks in the 5-leg ripple (aloft in trot/run).
-- Solver is exact in-band (one-step target-compensation polish in `src/ik.js`).
-- QA: 7–8/9 scenarios median-green (`node scripts/qa-gate.mjs --repeat 2`).
-  turnCycle red by choice (feel over metric), gaitShift 0.56 marginal.
-- Dev tools: probe/snap/trace/median-gate (see Relevant Files) — use them reflexively.
+## Completed
+- Gesture engine (f3326f8): `s.gesture={name,t,dur}` in step(); `__hand.gesture(name)`
+  + keys 1/2/3; blocked while airborne/moving; body-pose offsets via gesturePose() →
+  applyBodyPose (pitch/heading/roll) + ride-height spring (height); per-digit override
+  via poseLeg + leg mode `'gesture'` (replants via the aloft-exit real-swing path).
+- **Yes** (pitch bob ×2) and **No** (index wag ±0.28 ×3, WAG_BASE pip 0.5) — both read
+  well. **IDK** (rise+pitch+splay) works but USER SAYS: too slow, doesn't read well —
+  rework it (see Pending).
+- Full locomotion stack (walk/trot/run/jump/turn, 5-leg ripple) — don't re-litigate.
+- QA baseline: 7/9 required median-green; turnCycle red-by-choice; gaitShift ~0.556.
 
 ## Pending (priority order)
-1. §4.9 separation done right: bias SWING LANDINGS only (v1 yaw-shove on planted feet
-   is A/B-refuted, disabled; plumbing kept: `opts.sepBias`, `d.yawZSign`).
-2. Pivot-in-place step pattern for turnCycle (yaw cone ±0.3 bounds sustained rotation).
-3. Then Phase A: Web Speech STT → LLM intent → behavior library (docs/REBUILD-SPEC.md §9);
-   gestures are the first vocabulary entries.
+1. **Rework IDK/shrug** — feels slow and flat. Try: shorter dur (~1.1 s), snappier
+   rise (asymmetric envelope: fast up, slow settle), more pitch-back, maybe a double
+   pulse or digit lift (not just sepBias splay). Feel-over-metric; snap.mjs first.
+2. **New gestures**: wave, laugh, bow, point, beckon, thinking, tap (impatient).
+   Point/beckon/tap are single-digit poseLeg scripts (the "no" wag is the template —
+   part-curled base pose, keyframe or oscillate joints). Wave/bow are body-pose
+   scripts (the "yes" nod is the template). Laugh = body bounce (height pulses).
+   Consider a small keyframe/pose-track format in the engine instead of one bespoke
+   function per gesture — 7+ gestures will outgrow hand-written sine envelopes.
+3. **Idle animations**: after N s without input, play subtle random idles (breathing
+   height sway, finger drum, look-around heading drift, weight shift). Needs an idle
+   timer + random picker + instant cancel on any input/command.
+4. §4.9 separation on SWING LANDINGS only (plumbing: `opts.sepBias`, `d.yawZSign`).
+5. Pivot-in-place step pattern for turnCycle.
+6. Then Phase A brain: Web Speech STT → LLM intent → `__hand.gesture/autoWalk/jump`.
 
 ## Key Decisions
-- Gestures should be a **timed pose-script layer** over the standing stance: drive body
-  pose offsets (pitch/roll/height/heading wiggle) and optional per-digit pose overrides
-  while planted legs keep solving normally (`solveStance` adapts automatically — that's
-  how the whole sim works). Expose `sim.gesture(name)`; block/queue while airborne.
-- **No-gesture heading wiggle REFUTED** (traced, this session): ±0.25 rad of body
-  heading with feet world-pinned drives stance IK err to ~0.06 — past the 0.05 rescue
-  threshold — firing real re-swings on every digit (3 swings/leg, netSlide 0.27–0.33).
-  It is NOT "small enough for the yaw cones"; it's the same ±0.3 finger-yaw wall that
-  keeps turnCycle red. The index-finger wag replaced it: single digit via poseLeg
-  (mode 'gesture'), WAG_BASE pip 0.5 (a near-straight base pose at RATE_CARRY 7 sweeps
-  too long a lever arc — visible snap), replant through the aloft-exit real-swing path.
+- Gestures = timed pose-scripts over stance: body-pose offsets absorb automatically
+  (planted legs re-solve to world-pinned feet every frame); digits via poseLeg.
+  NEVER teleport feet; NEVER body-yaw at stance (see warning below).
+- **Body-heading wiggle at stance is REFUTED** (traced): ±0.25 rad drives stance err
+  ~0.06 > 0.05 rescue threshold → every digit re-swings. Same ±0.3 finger-yaw wall
+  that keeps turnCycle red. Head-shake-style motion must come from a digit instead.
+- poseLeg base poses must stay part-curled (pip ≥ ~0.5): near-straight poses at
+  RATE_CARRY 7 sweep a long lever arc and visibly snap (measured 0.107u/frame).
 - Feel-over-metric is the standing user priority; median gate is the honesty tool.
 
 ## Relevant Files
 | File | Notes |
 |------|-------|
-| `main.js` | sim core: makeSim (gait/physics/legs), calibrate(). Gesture layer goes here. |
-| `src/ik.js` | solveLeg (+polish), applyCurl, groundConstrain. `poseLeg` pattern in main.js. |
-| `src/tuning.js` | every constant; add gesture timings here. |
-| `docs/REBUILD-SPEC.md` | the original distilled spec (§4 invariants, §5 anatomy, §9 phases). |
-| `scripts/probe.mjs` | headless eval: `node scripts/probe.mjs "<expr>"` — THE metrics path. |
-| `scripts/snap.mjs` | headless screenshots → `.debug/*.png` (agent-readable). Visual verify. |
-| `scripts/trace.mjs` | per-frame JSONL gait traces + per-leg summaries. |
-| `scripts/qa-gate.mjs` | `--repeat N` median gating; `calib-gate.mjs` bit-exact snapshot. |
+| `main.js` | sim core; gesture engine: gesturePose(), gesture(), wagPose, leg mode 'gesture' |
+| `src/tuning.js` | all constants; GESTURE_DUR / YES_* / NO_* / IDK_* at the bottom |
+| `src/ik.js` | solveLeg/applyCurl/groundConstrain — poseLeg consumes applyCurl |
+| `docs/REBUILD-SPEC.md` | §4 invariants, §5 anatomy (do not "fix"), §9 buddy phases |
+| `scripts/probe.mjs` | headless eval: `node scripts/probe.mjs "<expr>"` — THE metrics path |
+| `scripts/snap.mjs` | headless screenshots → `.debug/*.png` (Read-able). Visual verify |
+| `scripts/trace.mjs` | per-frame JSONL; tip-continuity checks (frame-jump ≤ ~0.08) |
+| `scripts/qa-gate.mjs` | `--repeat 2` median gating (~200 s, run backgrounded); `calib-gate.mjs` bit-exact |
 
 ## Context & Warnings
-- Dev server: `python3 scripts/serve.py 8741` (no-cache, threaded; probably running).
-- Headless-only verification: hidden Chrome tabs freeze rAF; visible tabs throttle it.
-- The no-cache server serves the LIVE working tree — concurrent sessions/agents measure
-  each other's uncommitted edits; stamp measurements with git SHA.
-- Project memory (`~/.claude/projects/-Users-joshtaylor-CodingProjects-hand-walker/memory/`)
-  holds hard-won gotchas (frames, thumb, scrub law, refuted approaches). Read before tuning.
-- Commits: `--no-verify`, no Co-Authored-By trailers.
-- If gestures change calibration outputs, re-baseline deliberately: `calib-gate.mjs --update`.
+- Tree is CLEAN at f3326f8; all gates green at that SHA.
+- Dev server: `python3 scripts/serve.py 8741` (probably running; serves LIVE working
+  tree — stamp measurements with git SHA).
+- Verify HEADLESS only (visible Chrome throttles rAF; hidden tabs freeze the sim).
+- Gestures only run at stance (speed ≤ V_MOVE 0.15, not airborne) — idles must obey
+  the same gate.
+- Project memory (`~/.claude/projects/-Users-joshtaylor-CodingProjects-hand-walker/
+  memory/`) holds refuted approaches — trust its "don't do X again" notes.
+- Commits: `--no-verify`, no Co-Authored-By trailers, one commit per verified milestone.
+- Gate after each gesture: `npm run test:unit`, `node scripts/calib-gate.mjs`,
+  `node scripts/qa-gate.mjs --repeat 2` (expect 7/9 + turnCycle/gaitShift as above).
 
 ## Suggested Next Steps
-1. Read this file + `docs/REBUILD-SPEC.md` §4/§5/§9; skim `main.js` makeSim + the
-   gesture engine (gesturePose/gesture/wagPose + the 'gesture' leg mode).
-2. Phase A (REBUILD-SPEC §9): Web Speech STT → LLM intent → behavior library. The
-   action interface already exists: `__hand.gesture/autoWalk/jump`. Start with a
-   command grammar mapping intents onto it.
-3. Gesture polish if it reads flat in person: amplitudes/durations live in
-   `src/tuning.js` (GESTURE_DUR, YES_*, NO_*, IDK_*) — feel-over-metric, snap.mjs first.
+1. Read this file, then `main.js` (gesture engine block + step() + poseLeg) and
+   `src/tuning.js` gesture constants.
+2. Rework IDK per Pending #1; verify with snap.mjs + trace tip-continuity; gate.
+3. Design the pose-track format (keyframes over {body offsets, per-digit poses}),
+   port yes/no/idk onto it, then add the 7 new gestures on the same rails.
+4. Add the idle scheduler (timer + weighted random idle + cancel-on-input); gate.
