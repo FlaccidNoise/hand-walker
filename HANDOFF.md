@@ -1,82 +1,79 @@
-# Handoff — Gesture Vocabulary Expansion + Idle Animations
+# Handoff — Gesture Vocabulary + Idles Shipped; Next: User Feel Pass / Brain
 
 **Date:** 2026-07-16
 **Project:** hand-walker (`/Users/joshtaylor/CodingProjects/hand-walker`)
 
 ## Current Task
-Expand the gesture vocabulary toward an interactive buddy (STT→LLM→TTS brain, later
-session). New gestures wanted: **wave, laugh, bow, point, beckon, thinking, tap
-(impatient)** — plus **idle animations** that play when not interacted with. Aim for
-near-full versatility of a human hand; the gesture engine is the substrate.
+Gesture vocabulary + idle layer are BUILT (this session). Next: user feel pass on the
+10 gestures in the live browser (static-frame look was verified headless; motion feel
+was not user-judged), then §9 Phase A brain (STT → LLM intent → `__hand` calls).
 
-## Completed
-- Gesture engine (f3326f8): `s.gesture={name,t,dur}` in step(); `__hand.gesture(name)`
-  + keys 1/2/3; blocked while airborne/moving; body-pose offsets via gesturePose() →
-  applyBodyPose (pitch/heading/roll) + ride-height spring (height); per-digit override
-  via poseLeg + leg mode `'gesture'` (replants via the aloft-exit real-swing path).
-- **Yes** (pitch bob ×2) and **No** (index wag ±0.28 ×3, WAG_BASE pip 0.5) — both read
-  well. **IDK** (rise+pitch+splay) works but USER SAYS: too slow, doesn't read well —
-  rework it (see Pending).
-- Full locomotion stack (walk/trot/run/jump/turn, 5-leg ripple) — don't re-litigate.
-- QA baseline: 7/9 required median-green; turnCycle red-by-choice; gaitShift ~0.556.
+## Completed (this session)
+- **Pose-track engine** (`src/gestures.js`): gesture = `{ dur, body?{pitch,roll,height},
+  splay?{fingers,track}, digits?{f:{base, yaw/mcp/pip tracks, win:[u0,u1]}} }`;
+  Track = `[[u,v],...]` smoothstep keys; `osc(cycles,amp,env?)` generates oscillation
+  keys. Digit `win` windows let digits join/leave mid-gesture (exit re-plants via the
+  existing aloft-exit real-swing path). main.js samples defs generically — no bespoke
+  per-gesture code. Defs ARE the tuning (constants moved out of tuning.js).
+- **10 gestures** (keys 1-0): yes, no, idk (reworked: 1.1 s, fast-rise/slow-settle,
+  pitch-back −0.15, +0.1 rise, thumb flare), wave (finger ripple via windows), laugh
+  (height+pitch bounce ×4), bow (+pitch dip + crouch hold), point, beckon, thinking,
+  tap (4 verified ground strikes).
+- **Idles** (`IDLES` in gestures.js + scheduler in step()): breathe/shift/drum,
+  weighted-random after IDLE_AFTER 8 s sim without input, re-fire every IDLE_GAP 5 s
+  ±30%; `markInput()` in autoWalk/jump/gesture cancels instantly; real gestures
+  replace a running idle. Gated: idles need stance + f===0 + speed ≤ V_MOVE.
+- Gesture height now bypasses the RIDE_TAU ease (it smeared the shrug flat); the
+  support spring is the physical smoother. `__hand.GESTURES/IDLES` exposed (brain
+  phase can enumerate the vocabulary).
+- Gates at every milestone: unit ok, calib bit-exact, QA 7/9 baseline
+  (turnCycle red-by-choice, gaitShift ~0.55, spam allow-listed).
+
+## Verification Method (NEW — use this)
+- **Paused deterministic stepping**: `h.state.paused=true; h.sim.reset(); loop
+  h.sim.step(0.00625)`. dt MUST be ≤~0.008: the support spring's explicit-Euler
+  damping is UNSTABLE at dt 0.0125 (c·dt/m ≈ 3.2 > 2 — body launches to y≈5 in a
+  plain settle). Live headless runs ~120 fps (sim dt ~6 ms), which is why rAF runs
+  never showed it.
+- **Continuity probe**: step DT 0.00625, sample tips every 4th step (0.025 s sim ≈
+  old trace cadence). Yardsticks ON THIS PROBE: walking swing 0.22, approved 'no'
+  0.138 (RATE_CARRY digit-raise entry — the dominant term for all digit gestures),
+  body-only gestures ≈ 0 (feet pinned). Don't compare against the old "≤0.08" bar —
+  different method.
+- Snap mid-gesture: pause + step to phase, then screenshot (`snap.mjs --run` with a
+  ready-wait loop; snap's --run fires before page ready).
+
+## Key Decisions / Gotchas (this session)
+- Track keyframe peaks that must be REACHED need a hold (two keys): tap's
+  instantaneous 0.25-rad peaks got rate-clipped and never hit ground; held 0.4-rad
+  strokes strike (index stance tip y = pad height 0.0896 — "ground" for strike
+  detection, not y≈0).
+- Sign conventions: pitch − = stump-up/rear-back (idk), + = dip/bow; digit mcp − =
+  lift. walkPitch itself is −0.15.
+- IDLE_AFTER (8 s sim) must exceed every QA quiet stretch (rest = 3 s) or idles
+  contaminate the gate — checked, safe, qa.js untouched.
+- Still true: NO body-heading tracks (refuted, re-swing storm); digit bases stay
+  part-curled pip ≥ ~0.5 (rate-cap snap).
 
 ## Pending (priority order)
-1. **Rework IDK/shrug** — feels slow and flat. Try: shorter dur (~1.1 s), snappier
-   rise (asymmetric envelope: fast up, slow settle), more pitch-back, maybe a double
-   pulse or digit lift (not just sepBias splay). Feel-over-metric; snap.mjs first.
-2. **New gestures**: wave, laugh, bow, point, beckon, thinking, tap (impatient).
-   Point/beckon/tap are single-digit poseLeg scripts (the "no" wag is the template —
-   part-curled base pose, keyframe or oscillate joints). Wave/bow are body-pose
-   scripts (the "yes" nod is the template). Laugh = body bounce (height pulses).
-   Consider a small keyframe/pose-track format in the engine instead of one bespoke
-   function per gesture — 7+ gestures will outgrow hand-written sine envelopes.
-3. **Idle animations**: after N s without input, play subtle random idles (breathing
-   height sway, finger drum, look-around heading drift, weight shift). Needs an idle
-   timer + random picker + instant cancel on any input/command.
-4. §4.9 separation on SWING LANDINGS only (plumbing: `opts.sepBias`, `d.yawZSign`).
-5. Pivot-in-place step pattern for turnCycle.
-6. Then Phase A brain: Web Speech STT → LLM intent → `__hand.gesture/autoWalk/jump`.
-
-## Key Decisions
-- Gestures = timed pose-scripts over stance: body-pose offsets absorb automatically
-  (planted legs re-solve to world-pinned feet every frame); digits via poseLeg.
-  NEVER teleport feet; NEVER body-yaw at stance (see warning below).
-- **Body-heading wiggle at stance is REFUTED** (traced): ±0.25 rad drives stance err
-  ~0.06 > 0.05 rescue threshold → every digit re-swings. Same ±0.3 finger-yaw wall
-  that keeps turnCycle red. Head-shake-style motion must come from a digit instead.
-- poseLeg base poses must stay part-curled (pip ≥ ~0.5): near-straight poses at
-  RATE_CARRY 7 sweep a long lever arc and visibly snap (measured 0.107u/frame).
-- Feel-over-metric is the standing user priority; median gate is the honesty tool.
+1. **User feel pass** on all 10 gestures + 3 idles live (keys 1-0; idles fire after
+   8 s hands-off). Iterate amplitudes/durations in `src/gestures.js` defs only.
+2. §4.9 separation on SWING LANDINGS only (plumbing ready: `opts.sepBias`, `d.yawZSign`).
+3. Pivot-in-place step pattern for turnCycle.
+4. §9 Phase A brain: Web Speech STT → LLM intent → `__hand.gesture/autoWalk/jump`
+   (+ TTS — the hand talks back; see memory buddy-goal-and-tooling).
 
 ## Relevant Files
 | File | Notes |
 |------|-------|
-| `main.js` | sim core; gesture engine: gesturePose(), gesture(), wagPose, leg mode 'gesture' |
-| `src/tuning.js` | all constants; GESTURE_DUR / YES_* / NO_* / IDK_* at the bottom |
-| `src/ik.js` | solveLeg/applyCurl/groundConstrain — poseLeg consumes applyCurl |
-| `docs/REBUILD-SPEC.md` | §4 invariants, §5 anatomy (do not "fix"), §9 buddy phases |
-| `scripts/probe.mjs` | headless eval: `node scripts/probe.mjs "<expr>"` — THE metrics path |
-| `scripts/snap.mjs` | headless screenshots → `.debug/*.png` (Read-able). Visual verify |
-| `scripts/trace.mjs` | per-frame JSONL; tip-continuity checks (frame-jump ≤ ~0.08) |
-| `scripts/qa-gate.mjs` | `--repeat 2` median gating (~200 s, run backgrounded); `calib-gate.mjs` bit-exact |
+| `src/gestures.js` | THE gesture/idle tuning surface: defs + sampler + authoring rules |
+| `main.js` | engine integration: gesturePose/gestureDigitPose/poseLeg, idle scheduler in step() |
+| `src/tuning.js` | IDLE_AFTER/IDLE_GAP; gesture defs deliberately NOT here |
+| `scripts/probe.mjs` | headless eval; use paused-stepping recipe above |
+| `scripts/snap.mjs` / `trace.mjs` / `qa-gate.mjs` / `calib-gate.mjs` | unchanged |
 
 ## Context & Warnings
-- Tree is CLEAN at f3326f8; all gates green at that SHA.
-- Dev server: `python3 scripts/serve.py 8741` (probably running; serves LIVE working
-  tree — stamp measurements with git SHA).
+- Dev server `python3 scripts/serve.py 8741` serves the LIVE tree — stamp measurements
+  with git SHA; never edit sim code while qa-gate runs.
 - Verify HEADLESS only (visible Chrome throttles rAF; hidden tabs freeze the sim).
-- Gestures only run at stance (speed ≤ V_MOVE 0.15, not airborne) — idles must obey
-  the same gate.
-- Project memory (`~/.claude/projects/-Users-joshtaylor-CodingProjects-hand-walker/
-  memory/`) holds refuted approaches — trust its "don't do X again" notes.
 - Commits: `--no-verify`, no Co-Authored-By trailers, one commit per verified milestone.
-- Gate after each gesture: `npm run test:unit`, `node scripts/calib-gate.mjs`,
-  `node scripts/qa-gate.mjs --repeat 2` (expect 7/9 + turnCycle/gaitShift as above).
-
-## Suggested Next Steps
-1. Read this file, then `main.js` (gesture engine block + step() + poseLeg) and
-   `src/tuning.js` gesture constants.
-2. Rework IDK per Pending #1; verify with snap.mjs + trace tip-continuity; gate.
-3. Design the pose-track format (keyframes over {body offsets, per-digit poses}),
-   port yes/no/idk onto it, then add the 7 new gestures on the same rails.
-4. Add the idle scheduler (timer + weighted random idle + cancel-on-input); gate.
