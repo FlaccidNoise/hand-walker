@@ -80,8 +80,11 @@ export const STEER_GAIN = 6;          // yaw-rate gain toward the commanded head
 export const YAW_RATE_MAX = 0.35;     // rad/s — feet sweep yawRate·radius·stanceTime of arc
                                       // per stance; beyond ~0.1 rad/stance no band absorbs it
                                       // (a hand pivots deliberately, in small re-steps)
-export const CAD_YAW_GAIN = 1.5;      // cadence rise per |yaw rate| — turning buys re-steps (§4.5)
+// (rotational cadence demand now enters the zero-slip law via calib.rFoot — see main.js)
 export const ACCEL_TAU = 0.12;        // s — velocity-command response time (friction-limited)
+export const CMD_ACCEL = 2.5;         // u/s² — commanded-speed ramp; friction allows ~124 u/s²
+                                      // (0→run in 20ms) which strands every planted foot a full
+                                      // reach behind. Volition: accelerate at what legs service.
 
 // --- Swing shaping (§4.6) ---
 export const LANE_CLAMP = 0.09;       // lane half-width, ·reach
@@ -96,6 +99,8 @@ export const JUMP_STROKE = 0.12;      // world units of push-off stroke
 // --- Joint rate limits (rad/s): cap the solve, NEVER the constraint (§4.3) ---
 export const RATE_PLANTED = 16;
 export const RATE_SWING = 18;
+export const RATE_CARRY = 7;           // aloft/tuck pose transitions — cosmetic, not steps;
+                                       // at 18 rad/s the thumb visibly snapped (0.14u/frame)
 export const TUCK_MIN = 1.15;          // airborne legs never tuck below 1.15·standH
 
 // §5 stance rule: feet plant forward of the knuckles as descending diagonals — each

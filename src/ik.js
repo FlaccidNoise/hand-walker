@@ -66,7 +66,25 @@ function bindPlane(d) {
 //    (§4.4). The thumb is the same 3-bone chain rooted at its CMC (metacarpal joint).
 // Elbow branch: a weight-bearing digit bows its knuckle AWAY from the ground — pick the
 // branch that puts the PIP higher in world (§4.2). opts.branch forces it if given.
+// A one-step target-compensation polish then re-solves at the error-reflected target:
+// the analytic model's smooth residual (~0.16/rad of yaw, hinge-elevation crosstalk)
+// is what planted tips scrub while the geometry sweeps — killing it at the source
+// beats every downstream gait dial. opts.polish=false disables (dev A/B).
 export function solveLeg(d, target, opts = {}) {
+  const r1 = solveOnce(d, target, opts);
+  if (opts.polish === false || r1.err < 1e-3) return r1;
+  const t2 = target.clone().add(target).sub(r1.achieved);    // reflect the miss
+  const r2 = solveOnce(d, t2, { ...opts, branch: r1.branch, yaw: r1.angles.yaw });
+  const err2 = r2.achieved.distanceTo(target);               // judge vs the REAL target
+  if (err2 < r1.err) return { ...r2, err: err2 };
+  // re-apply the better first solution (r2 left the joints at its own pose)
+  applyCurl(d, r1.angles);
+  if (opts.root) opts.root.updateMatrixWorld(true);
+  d.yaw = r1.angles.yaw;
+  return r1;
+}
+
+function solveOnce(d, target, opts = {}) {
   const root = opts.root;
   const bp = bindPlane(d);
   const t = target.clone().sub(d.pos.mcp);

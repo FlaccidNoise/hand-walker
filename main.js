@@ -114,7 +114,7 @@ function makeSim(rig, calib) {
   const sepPrev = {};
 
   const s = {
-    v: new THREE.Vector3(), cmd: new THREE.Vector3(),
+    v: new THREE.Vector3(), cmd: new THREE.Vector3(), cmdT: new THREE.Vector3(),
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', phase: 0, f: 0, speed: 0, planted: 0,
     airborne: false, time: 0,
@@ -214,17 +214,24 @@ function makeSim(rig, calib) {
       leg.mode = 'swing';
       return;
     }
-    const stanceTime = dutyEff() / Math.max(s.f, 1e-3);
+    const T = dutyEff() / Math.max(s.f, 1e-3) / mult;        // this leg's stance time
     const vLoc = _b.copy(s.v).applyAxisAngle(UP, -s.heading);
-    const stanceDist = Math.min(Math.abs(vLoc.x) * stanceTime / mult,
-      band.hi - band.lo - 2 * C.BAND_MARGIN);
     // plan in the PREDICTED hand frame at landing time — the body translates v·dur and
     // rotates yawRate·dur during the swing; planning in the current frame lands feet
     // systematically stale (drained bands when walking, swept lanes when turning §4.6)
-    const sLand = M.clamp((band.lo + band.hi) / 2 + 0.5 * stanceDist,
-      band.lo + C.BAND_MARGIN, band.hi - C.BAND_MARGIN);
+    const cen = (band.lo + band.hi) / 2;
     const lz = calib.laneZ[f] ?? calib.feet[f].z;            // yaw-centred walking lane
-    const zLand = M.clamp(lz + vLoc.z * 0.5 * stanceTime,
+    // in-frame drift velocity of a world-fixed foot at (x,z): dq/dt = -v_loc - ω×q →
+    // (−vx − ω·z, −vz + ω·x). Land half a sweep up-drift so the stance excursion is
+    // CENTRED — one-sided excursions run the ∝|yaw| error ramp and the tip scrubs it
+    // (measured: 0.05-0.07 net/stance while rotating for the centred-less legs; the
+    // pattering pinky's naturally short, centred stances scrubbed only 0.005)
+    const om = s.yawRate;                                     // sign verified by A/B
+    const driftX = -vLoc.x - om * lz;
+    const driftZ = -vLoc.z + om * (mcpHX + cen);
+    const sLand = M.clamp(cen - 0.5 * driftX * T,
+      band.lo + C.BAND_MARGIN, band.hi - C.BAND_MARGIN);
+    const zLand = M.clamp(lz - 0.5 * driftZ * T,
       lz - d.reachW * C.LANE_CLAMP, lz + d.reachW * C.LANE_CLAMP);
     // NOTE: no 0.72·reach cap here — the ORIGINAL's proxy for live-height reachability
     // contradicts this stance (rests at 0.92·reach) and pulled land targets airborne.
@@ -262,8 +269,9 @@ function makeSim(rig, calib) {
     }
   }
 
-  // aloft (trot/run thumb): carried lifted, bears no weight (§4.7)
-  const ALOFT = { yaw: 0, mcp: -0.3, pip: 1.3, dip: M.clamp(1.3 * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
+  // aloft (moving-gait thumb): carried lifted, bears no weight (§4.7). Mild curl —
+  // a deep tuck meant long, fast transitions every start/stop (the visible jank)
+  const ALOFT = { yaw: 0, mcp: -0.15, pip: 0.9, dip: M.clamp(0.9 * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
   function poseLeg(f, pose, rate, dt) {
     const d = rig.digits[f], leg = legs[f];
     const a = { ...pose };
@@ -300,6 +308,11 @@ function makeSim(rig, calib) {
 
   function step(dt) {
     s.time += dt;
+    // ramp the command toward its target at CMD_ACCEL — see tuning.js
+    const dcx = s.cmdT.x - s.cmd.x, dcz = s.cmdT.z - s.cmd.z;
+    const dcl = Math.hypot(dcx, dcz), dcMax = C.CMD_ACCEL * dt;
+    if (dcl > dcMax) { s.cmd.x += dcx / dcl * dcMax; s.cmd.z += dcz / dcl * dcMax; }
+    else { s.cmd.x = s.cmdT.x; s.cmd.z = s.cmdT.z; }
     const cmdSpeed = Math.hypot(s.cmd.x, s.cmd.z);
 
     // --- steering ---
@@ -355,14 +368,16 @@ function makeSim(rig, calib) {
       applyBodyPose();
     }
 
-    // --- phase engine (§4.5): cadence solved for zero foot-slip ---
+    // --- phase engine (§4.5): cadence solved for zero foot-slip. Rotation IS slip
+    // demand: a foot at radius r sweeps |yawRate|·r of hand-frame arc, so it enters
+    // the law as extra velocity (an additive Hz bolt-on stopped scaling when the
+    // polished solver widened the bands) ---
     const gd = C.GAITS[s.gait], gp = s.gaitP[s.gait];
-    if (!s.airborne && (cmdSpeed > C.V_MOVE || s.speed > C.V_MOVE)) {
-      const v = Math.max(s.speed, C.V_MOVE);
+    if (!s.airborne && (cmdSpeed > C.V_MOVE || s.speed > C.V_MOVE || Math.abs(s.yawRate) > 0.05)) {
+      const v = Math.max(s.speed + Math.abs(s.yawRate) * calib.rFoot, C.V_MOVE);
       const crossF = (1 - gd.duty) / C.SWING_MIN;
       let f = v * gd.duty / gp.S;
       if (f > crossF) f = v / (gp.S + C.SWING_MIN * v);
-      f += C.CAD_YAW_GAIN * Math.abs(s.yawRate);             // turning consumes band
       s.f = Math.min(f, gd.fMax);
       s.phase += s.f * dt;                                   // UNWRAPPED: floor() is the cycle id
     } else s.f = 0;
@@ -381,12 +396,14 @@ function makeSim(rig, calib) {
       const leg = legs[f];
       if (s.airborne) { leg.mode = 'tuck'; tuckLeg(f, dt); continue; }
       if (gd.aloft.includes(f) && s.speed > C.V_MOVE) {      // aloft only while moving (§4.7)
-        leg.mode = 'aloft'; poseLeg(f, ALOFT, C.RATE_SWING, dt); continue;
+        leg.mode = 'aloft'; poseLeg(f, ALOFT, C.RATE_CARRY, dt); continue;
       }
-      if (leg.mode === 'aloft' || leg.mode === 'tuck') {     // re-plant at the rest
-        handToWorld(_b.copy(calib.feet[f]), leg.foot);
-        leg.foot.y = groundY(leg.foot.x, leg.foot.z) + padHeight(rig.digits[f]);
-        leg.mode = 'stance'; leg.cycleId = -1;
+      if (leg.mode === 'aloft' || leg.mode === 'tuck') {     // re-plant via a REAL swing —
+        const to = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // teleporting
+        to.y = groundY(to.x, to.z) + padHeight(rig.digits[f]); // the foot dragged the tip
+        leg.swing = { from: rig.digits[f].tip.getWorldPosition(new THREE.Vector3()),
+          to, t: 0, dur: 0.2, rescue: false };                // across at the rate cap (jank)
+        leg.mode = 'swing'; leg.cycleId = -1;
       }
       const cyc = s.phase * (gp.mult[f] ?? 1) + gd.offsets[f];
       const p = cyc % 1, id = Math.floor(cyc);
@@ -402,6 +419,8 @@ function makeSim(rig, calib) {
         const sFoot = fh.x - mcpHX;
         const zOff = Math.abs(fh.z - (calib.laneZ[f] ?? calib.feet[f].z));
         const band = bandAt(f, body.position.y);
+        // NOTE: tighter thresholds (1.2×, 2×tol) A/B'd WORSE — earlier rescues churn
+        // more slide than the yaw-clamp boundary layer they trim
         if ((band && sFoot < band.lo - 0.02)
           || zOff > 2 * d2.reachW * C.LANE_CLAMP
           || leg.err > 4 * C.BAND_TIP_ERR) {
@@ -417,7 +436,7 @@ function makeSim(rig, calib) {
   }
 
   function reset(px = 0, pz = 0, heading = 0) {
-    s.v.set(0, 0, 0); s.cmd.set(0, 0, 0);
+    s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
     s.airborne = false;
@@ -433,7 +452,7 @@ function makeSim(rig, calib) {
   function autoWalk(x, z) {                                  // velocity command, u/s
     const l = Math.hypot(x, z);
     const k = l > C.V_MAX ? C.V_MAX / l : 1;                 // leash tops out at V_MAX
-    s.cmd.set(x * k, 0, z * k);
+    s.cmdT.set(x * k, 0, z * k);                             // ramped toward in step()
   }
 
   function jump() {
@@ -674,7 +693,9 @@ function calibrate(rig) {
   setPose(standH, false);
   const plantErr = {};
   for (const f of FINGERS) { rig.digits[f].yaw = 0; plantErr[f] = plantDigit(f); }
-  return { standH, walkH, perDigitH, plantErr, feet, laneZ, bands, workC, dMin, strideMax, bandTable,
+  // mean foot radius — the rotational term of the zero-slip cadence law (§4.5)
+  const rFoot = FINGERS.reduce((sum, f) => sum + Math.hypot(feet[f].x, feet[f].z), 0) / FINGERS.length;
+  return { standH, walkH, perDigitH, plantErr, feet, laneZ, rFoot, bands, workC, dMin, strideMax, bandTable,
     // dev/debug handles (mutate the pose — probe use only)
     laneDir, restExt, restsAt, scanBand, solveTo, setPose, bellyFloor };
 }
