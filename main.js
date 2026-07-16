@@ -140,17 +140,22 @@ function calibrate(rig) {
     const mcpW = d.mcp.getWorldPosition(tmp);
     if (mcpW.y < padHeight(d)) return null;
     const mcpX = mcpW.x;
+    const sRest = feet[f].x - mcpX;                          // the stance the leg actually uses
     const target = new THREE.Vector3(0, padHeight(d), feet[f].z);
     d.yaw = 0;                                               // deterministic branch seed
-    const runs = []; let cur = null, minErr = Infinity, minS = null;
+    const runs = []; let cur = null;
     for (let s = C.BAND_S_MIN; s <= C.BAND_S_MAX + 1e-9; s += step) {
       target.x = mcpX + s;
       const err = solveTo(d, target);
-      if (err < minErr) { minErr = err; minS = s; }
       if (err < C.BAND_TIP_ERR) { if (cur) cur.hi = s; else runs.push(cur = { lo: s, hi: s }); }
       else cur = null;
     }
-    return runs.find(r => minS >= r.lo && minS <= r.hi) ?? null;
+    // keep the run holding the rest offset (else nearest to it) — a global-best-error
+    // selector is fragile: the thumb's yaw cone reaches spurious pockets behind the MCP
+    return runs.find(r => sRest >= r.lo && sRest <= r.hi)
+      ?? runs.sort((a, b) => Math.min(Math.abs(a.lo - sRest), Math.abs(a.hi - sRest))
+        - Math.min(Math.abs(b.lo - sRest), Math.abs(b.hi - sRest)))[0]
+      ?? null;
   };
   const walkH = standH * C.POSE_CROUCH + C.POSE_SAG;
 

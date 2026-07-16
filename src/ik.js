@@ -99,21 +99,21 @@ export function solveLeg(d, target, opts = {}) {
   const solveBranch = (s) => {
     const r = d.slave, L1 = d.L1, L2 = d.L2;
     let th = 0, a0 = 0;
-    for (let i = 0; i < 4; i++) {
-      const g = (bp.beta2 - bp.beta1) + r * th;           // bone2 angle relative to bone1
+    for (let i = 0; i < 10; i++) {                        // under-relaxed: the map
+      const g = (bp.beta2 - bp.beta1) + r * th;           // oscillates for deep curls
       const l1e = Math.hypot(L1 + L2 * Math.cos(g), L2 * Math.sin(g));
       const del = Math.atan2(L2 * Math.sin(g), L1 + L2 * Math.cos(g));
       const [A0, A1] = M.cosIK(d.L0, l1e, d2);
-      th = s * (Math.PI - A1) - del - bp.beta1;
+      th += 0.6 * ((s * (Math.PI - A1) - del - bp.beta1) - th);
       a0 = A0;
     }
-    return { yaw, mcp: base - s * a0, pip: th, dip: r * th };
+    return { yaw, mcp: base - s * a0, pip: th };
   };
   const mk = (s) => {
     const a = solveBranch(s);
     a.mcp = M.clamp(a.mcp, C.LIMITS[0][0], C.LIMITS[0][1]);
     a.pip = M.clamp(a.pip, C.LIMITS[1][0], C.LIMITS[1][1]);
-    a.dip = M.clamp(a.dip, C.LIMITS[2][0], C.LIMITS[2][1]);
+    a.dip = M.clamp(d.slave * a.pip, C.LIMITS[2][0], C.LIMITS[2][1]); // DIP follows the CLAMPED pip
     return a;
   };
   let angles;
@@ -143,31 +143,38 @@ export function solveLeg(d, target, opts = {}) {
 export function groundConstrain(d, root, ground = groundY, fleshW = padHeight(d)) {
   const stages = [[d.mcp, [d.pip, d.dip, d.tip]], [d.pip, [d.dip, d.tip]], [d.dip, [d.tip]]];
   let total = 0;
-  for (const [pivot, contacts] of stages) {
-    // worst violation among this pivot's distal contacts (world space)
-    let worst = null, worstPen = 1e-4;
-    for (const c of contacts) {
-      const p = c.getWorldPosition(new THREE.Vector3());
-      const pen = ground(p.x, p.z) + fleshW - p.y;
-      if (pen > worstPen) { worstPen = pen; worst = p; }
+  // multi-pass: stage 1 lifts only the WORST violator to exact clearance, which can
+  // leave a shallower PIP violation that no later stage can reach — re-pass until clean
+  for (let pass = 0; pass < 3; pass++) {
+    let acted = false;
+    for (const [pivot, contacts] of stages) {
+      // worst violation among this pivot's distal contacts (world space)
+      let worst = null, worstPen = 1e-4;
+      for (const c of contacts) {
+        const p = c.getWorldPosition(new THREE.Vector3());
+        const pen = ground(p.x, p.z) + fleshW - p.y;
+        if (pen > worstPen) { worstPen = pen; worst = p; }
+      }
+      if (!worst) continue;
+      // rotation Δ about the pivot's hinge (world X column) lifting `worst` to clearance:
+      // y(Δ) = (A−K)cosΔ + B sinΔ + K, K = â.y·(â·v)  →  solve for y = ground+flesh
+      const piv = pivot.getWorldPosition(new THREE.Vector3());
+      const ax = new THREE.Vector3().setFromMatrixColumn(pivot.matrixWorld, 0).normalize();
+      const v = worst.clone().sub(piv);
+      const K = ax.y * ax.dot(v);
+      const A = v.y - K, B = new THREE.Vector3().crossVectors(ax, v).y;
+      const Rm = Math.hypot(A, B);
+      if (Rm < 1e-9) continue;
+      const yWant = ground(worst.x, worst.z) + fleshW - piv.y;
+      const al = Math.atan2(B, A), ac = Math.acos(M.clamp((yWant - K) / Rm, -1, 1));
+      const d1 = M.wrapAngle(al - ac), d2 = M.wrapAngle(al + ac);
+      const delta = Math.abs(d1) <= Math.abs(d2) ? d1 : d2;
+      pivot.rotateOnAxis(_X, delta);
+      root.updateMatrixWorld(true);
+      total += Math.abs(delta);
+      acted = true;
     }
-    if (!worst) continue;
-    // rotation Δ about the pivot's hinge (world X column) lifting `worst` to clearance:
-    // y(Δ) = (A−K)cosΔ + B sinΔ + K, K = â.y·(â·v)  →  solve for y = ground+flesh
-    const piv = pivot.getWorldPosition(new THREE.Vector3());
-    const ax = new THREE.Vector3().setFromMatrixColumn(pivot.matrixWorld, 0).normalize();
-    const v = worst.clone().sub(piv);
-    const K = ax.y * ax.dot(v);
-    const A = v.y - K, B = new THREE.Vector3().crossVectors(ax, v).y;
-    const Rm = Math.hypot(A, B);
-    if (Rm < 1e-9) continue;
-    const yWant = ground(worst.x, worst.z) + fleshW - piv.y;
-    const al = Math.atan2(B, A), ac = Math.acos(M.clamp((yWant - K) / Rm, -1, 1));
-    const d1 = M.wrapAngle(al - ac), d2 = M.wrapAngle(al + ac);
-    const delta = Math.abs(d1) <= Math.abs(d2) ? d1 : d2;
-    pivot.rotateOnAxis(_X, delta);
-    root.updateMatrixWorld(true);
-    total += Math.abs(delta);
+    if (!acted) break;
   }
   return total;
 }
