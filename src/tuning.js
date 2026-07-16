@@ -32,7 +32,8 @@ export const THUMB_SLAVE = 0.5;       // thumb IP slaved to its MCP flexion (CMC
 // MCP ab/adduction yaw (§4.2): anatomical range (§7: fingers ±0.3, thumb ±0.65),
 // faded out near the knuckle where the lever shrinks (|t|/reach between LO and HI).
 export const YAW_MAX_FINGER = 0.3;
-export const YAW_MAX_THUMB = 0.65;
+export const YAW_MAX_THUMB = 0.9;     // CMC palmar abduction (~50°) — the ±0.65 figure was
+                                      // the original's proximal-rooted thumb, ours roots at the CMC
 export const YAW_FADE_LO = 0.15;
 export const YAW_FADE_HI = 0.40;
 export const ARC_CLEAR = 0.05;         // load-bearing step-height margin, binds on ~80% of swing frames (anatomy, §5)
@@ -45,6 +46,8 @@ export const SEP_AUTH_SWING = 0.30;
 
 // --- Phase gait (§4.5) ---
 export const PHASE_SEP = 0.25;         // min phase gap between spatially adjacent digits
+export const BAND_UTIL = 0.8;          // cadence law targets this fraction of the pacer band —
+                                       // 0.9/1.0 raise edge drift more than fewer steps save
 
 // --- Steering ---
 export const V_MAX = 2.6;             // u/s leash / gamepad top (walk→run)
@@ -70,12 +73,11 @@ export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lowe
 
 // --- Steering / cadence ---
 export const STEER_GAIN = 6;          // yaw-rate gain toward the commanded heading (1/s)
-export const YAW_RATE_MAX = 3;        // rad/s
-export const CAD_YAW_GAIN = 0.5;      // cadence rise per |yaw rate| — turning consumes band (§4.5)
+export const YAW_RATE_MAX = 1.2;      // rad/s — faster whips planted feet out of every band
+export const CAD_YAW_GAIN = 0.8;      // cadence rise per |yaw rate| — turning consumes band (§4.5)
 export const ACCEL_TAU = 0.12;        // s — velocity-command response time (friction-limited)
 
 // --- Swing shaping (§4.6) ---
-export const SWING_LAND_FRAC = 0.72;  // land inside 0.72·padReach at the live height
 export const LANE_CLAMP = 0.09;       // lane half-width, ·reach
 export const BAND_MARGIN = 0.03;      // keep landings this far inside the band edges
 export const FOLD_K = 0.6;            // rad of extra PIP curl at peak stepping fold

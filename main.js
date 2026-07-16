@@ -129,7 +129,7 @@ function makeSim(rig, calib) {
     const maxLen = Math.max(...used.map(f => len[f]));
     const mult = {};                                         // short-band legs patter at 2× (§4.4)
     used.forEach(f => mult[f] = len[f] < 0.5 * maxLen ? 2 : 1);
-    const S = Math.min(...used.map(f => len[f] * mult[f]));
+    const S = C.BAND_UTIL * Math.min(...used.map(f => len[f] * mult[f]));
     const crossF = (1 - gd.duty) / C.SWING_MIN;
     const vTop = Math.min(gd.vCap, gd.fMax <= crossF
       ? gd.fMax * S / gd.duty
@@ -163,9 +163,13 @@ function makeSim(rig, calib) {
 
   // solve a leg to a WORLD target: rate limits cap the solve, NEVER the constraint
   // (§4.3); the stepping fold is blended in BEFORE the constraint.
-  function solveLegWorld(f, targetW, rateCap, dt, fold = 0) {
+  // `branch` pins the elbow branch (stance stickiness — the thumb's oblique plane makes
+  // the auto-selector's two candidates near-equal, and per-frame flip-flop wobbles the
+  // planted tip); swings pass null and re-select freely (§4.2).
+  function solveLegWorld(f, targetW, rateCap, dt, fold = 0, branch = null) {
     const d = rig.digits[f], leg = legs[f];
-    const res = solveLeg(d, rig.root.worldToLocal(_a.copy(targetW)), { root: rig.root });
+    const res = solveLeg(d, rig.root.worldToLocal(_a.copy(targetW)), { root: rig.root, branch });
+    leg.branch = res.branch;
     const a = { ...res.angles };
     if (fold > 0) {
       a.pip = M.clamp(a.pip + C.FOLD_K * fold, C.LIMITS[1][0], C.LIMITS[1][1]);
@@ -178,12 +182,16 @@ function makeSim(rig, calib) {
     }
     applyCurl(d, a);
     rig.root.updateMatrixWorld(true);
-    if (!s.airborne) groundConstrain(d, rig.root);           // tuck skips it (§4.3)
+    // tuck skips the constraint (§4.3) — but only while the body is high enough that
+    // rate-limited tucks can't lag into the floor (dips happen on ASCENT too, while
+    // legs transition stance→tuck); below 1.3·standH the floor wins again
+    if (!s.airborne || body.position.y <= calib.standH * 1.3) groundConstrain(d, rig.root);
     leg.angles = a;
     leg.err = d.tip.getWorldPosition(_a).distanceTo(targetW);
     return leg.err;
   }
-  const solveStance = (f, dt = 0) => solveLegWorld(f, legs[f].foot, dt ? C.RATE_PLANTED : 0, dt);
+  const solveStance = (f, dt = 0) =>
+    solveLegWorld(f, legs[f].foot, dt ? C.RATE_PLANTED : 0, dt, 0, legs[f].branch ?? null);
 
   // --- swing planning (§4.6): hand frame, live MCP, band at live height ---
   function startSwing(f) {
@@ -213,14 +221,12 @@ function makeSim(rig, calib) {
       band.lo + C.BAND_MARGIN, band.hi - C.BAND_MARGIN + Math.max(vLoc.x, 0) * dur);
     const zLand = M.clamp(calib.feet[f].z + vLoc.z * (0.5 * stanceTime + dur),
       calib.feet[f].z - d.reachW * C.LANE_CLAMP, calib.feet[f].z + d.reachW * C.LANE_CLAMP);
+    // NOTE: no 0.72·reach cap here — the ORIGINAL's proxy for live-height reachability
+    // contradicts this stance (rests at 0.92·reach) and pulled land targets airborne.
+    // The band clamp above IS the live-height capability (scanned at ground height
+    // through the real solve stack).
     const landW = handToWorld(_b.set(mcpHX + sLand, 0, zLand), new THREE.Vector3());
     landW.y = groundY(landW.x, landW.z) + padHeight(d);
-    const vm = _b.copy(landW).sub(d.mcp.getWorldPosition(_a));
-    const cap = C.SWING_LAND_FRAC * d.reachW + s.speed * dur; // inside 0.72·padReach at landing
-    if (vm.length() > cap) {
-      landW.copy(_a).addScaledVector(vm.normalize(), cap);
-      landW.y = Math.max(landW.y, groundY(landW.x, landW.z) + padHeight(d));
-    }
     leg.swing = { from: leg.foot.clone(), to: landW, t: 0, dur, rescue };
     leg.mode = 'swing';
   }
@@ -242,6 +248,10 @@ function makeSim(rig, calib) {
       leg.mode = 'stance';
       leg.swing = null;
       leg.err = 0;    // vs the pinned foot — a stale swing-target err re-triggered settles
+      // snap the stance solve uncapped once: the target IS the current tip, so nothing
+      // visibly moves, but the angles normalize (no fold, exact solution) — otherwise
+      // the rate-limited settle sweeps the tip for a few frames and reads as slide
+      solveStance(f);
     }
   }
 
@@ -367,6 +377,17 @@ function makeSim(rig, calib) {
       if (leg.mode === 'stance' && s.f > 0 && p >= de && leg.cycleId !== id) {
         leg.cycleId = id;
         startSwing(f);
+      } else if (leg.mode === 'stance' && s.f > 0 && leg.cycleId !== id) {
+        // band-exit rescue (§4.6): a foot dragged past the band bottom (or unreachable
+        // while turning) can't wait for its phase slot — it's being towed
+        const d2 = rig.digits[f];
+        const mcpHX = worldToHand(d2.mcp.getWorldPosition(_a), _b).x;
+        const sFoot = worldToHand(leg.foot, _b).x - mcpHX;
+        const band = bandAt(f, body.position.y);
+        if ((band && sFoot < band.lo - 0.02) || leg.err > 4 * C.BAND_TIP_ERR) {
+          leg.cycleId = id;
+          startSwing(f);
+        }
       } else if (leg.mode === 'stance' && s.f === 0 && leg.err > 2 * C.BAND_TIP_ERR) {
         startSwing(f);                                       // settle a stretched leg at rest
       }

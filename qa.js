@@ -61,8 +61,10 @@ function makeRecorder(H) {
         }
       }
       if (leg.mode !== 'swing' && swingStart[f] != null) {
-        r.swings.push(sim.s.time - swingStart[f]);
-        r.lifts.push(swingPeak[f]);
+        if (leg.mode === 'stance') {                         // landed; aloft/tuck interruptions
+          r.swings.push(sim.s.time - swingStart[f]);         // are not swings
+          r.lifts.push(swingPeak[f]);
+        }
         swingStart[f] = null;
       }
     }

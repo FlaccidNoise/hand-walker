@@ -116,21 +116,23 @@ export function solveLeg(d, target, opts = {}) {
     a.dip = M.clamp(d.slave * a.pip, C.LIMITS[2][0], C.LIMITS[2][1]); // DIP follows the CLAMPED pip
     return a;
   };
-  let angles;
+  let angles, branch;
   if (opts.branch != null) {
-    angles = mk(opts.branch > 0 ? +1 : -1);
+    branch = opts.branch > 0 ? +1 : -1;
+    angles = mk(branch);
     applyCurl(d, angles);
   } else {
     // pick the branch whose PIP is higher in world (knuckle bows away from ground)
     const tryB = (s) => { applyCurl(d, mk(s)); root && root.updateMatrixWorld(true);
       return (d.pip || d.dip).getWorldPosition(_v).y; };
     const yP = tryB(+1), yM = tryB(-1);
-    angles = mk(yP >= yM ? +1 : -1);
+    branch = yP >= yM ? +1 : -1;
+    angles = mk(branch);
     applyCurl(d, angles);
   }
   if (root) root.updateMatrixWorld(true);
   const achieved = tipLocal(d, root || d.mcp.parent);
-  return { angles, achieved, err: achieved.distanceTo(target) };
+  return { angles, achieved, err: achieved.distanceTo(target), branch };
 }
 
 // 3-stage ground constraint (§4.3) — the uncapped last word after solveLeg. Tip, DIP
