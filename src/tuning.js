@@ -102,6 +102,7 @@ export const TUCK_MIN = 1.15;          // airborne legs never tuck below 1.15·s
 // digit (incl. thumb) plants through the real solver; the pinky pins it.
 export const REST_EXT = 0.92;
 export const REST_MIN_FWD = 0.25;
+export const BELLY_CLEAR = 0.06;      // palm/stump underside stays at least this far off the floor
 
 // --- Calibration (§4.4) ---
 export const CALIB_DT = 0.05;         // fixed dt, no wall clock → bit-exact

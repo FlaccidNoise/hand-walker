@@ -3,3 +3,4 @@ dist/
 *.artifact.html
 .DS_Store
 __pycache__/
+.debug/

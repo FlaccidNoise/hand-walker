@@ -48,6 +48,58 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
   }
   root.updateMatrixWorld(true);
 
+  // --- mesh-derived flesh (§4.1) — measured at EXACT bind, before any joint edits:
+  // per-digit tip pad radius = max radial distance of distal/tip-weighted skin
+  // vertices from the distal bone axis; palm/stump under-depth = how far palm-region
+  // vertices (wrist + finger metacarpals) extend along the bind palm normal (+X)
+  // past the wrist. Joint centers with a token radius made fingertips clip the floor
+  // and the belly rest on it. Values in bind meters here; scaled to world below. ---
+  const fleshM = {};
+  let palmDepthM = 0;
+  {
+    let mesh = null;
+    root.traverse(o => { if (o.isSkinnedMesh && !mesh) mesh = o; });
+    const posA = mesh.geometry.attributes.position;
+    const idxA = mesh.geometry.attributes.skinIndex;
+    const wA = mesh.geometry.attributes.skinWeight;
+    const boneName = mesh.skeleton.bones.map(b => b.name);
+    const tipSets = {};
+    for (const f of FINGERS) {
+      const p = jointPrefix(f);
+      tipSets[f] = new Set([`${p}-phalanx-distal`, `${p}-tip`]);
+    }
+    const palmSet = new Set(['wrist', ...FINGERS.filter(f => f !== 'thumb')
+      .map(f => `${jointPrefix(f)}-metacarpal`)]);
+    const axes = {};                                          // distal bone axis per digit
+    for (const f of FINGERS) {
+      const p = jointPrefix(f);
+      const D = byName[`${p}-phalanx-distal`].getWorldPosition(new THREE.Vector3());
+      const T = byName[`${p}-tip`].getWorldPosition(new THREE.Vector3());
+      axes[f] = { D, u: T.clone().sub(D).normalize() };
+      fleshM[f] = 0;
+    }
+    const wristX = wrist.getWorldPosition(new THREE.Vector3()).x;
+    const v = new THREE.Vector3(), r = new THREE.Vector3();
+    for (let i = 0; i < posA.count; i++) {
+      let dom = 0, wMax = -1;
+      for (let k = 0; k < 4; k++) {
+        const w = wA.getComponent(i, k);
+        if (w > wMax) { wMax = w; dom = idxA.getComponent(i, k); }
+      }
+      const name = boneName[dom];
+      mesh.getVertexPosition(i, v);
+      mesh.localToWorld(v);
+      if (palmSet.has(name) && v.x - wristX > palmDepthM) palmDepthM = v.x - wristX;
+      for (const f of FINGERS) {
+        if (!tipSets[f].has(name)) continue;
+        r.copy(v).sub(axes[f].D);
+        r.addScaledVector(axes[f].u, -r.dot(axes[f].u));      // radial from the bone axis
+        if (r.length() > fleshM[f]) fleshM[f] = r.length();
+        break;
+      }
+    }
+  }
+
   // --- hinge-axis alignment: twist each digit's distal joints about their bone axes
   // (local Z) so every hinge (local X) parallels its root joint's — the GLB's axes
   // splay a few degrees per joint (thumb ~40°), which breaks the shared-axis planar
@@ -139,12 +191,14 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
   // --- scale so middle-finger reach (MCP→tip) = 1 world unit ---
   const middleReach = digits.middle.reach;
   const scale = 1 / middleReach;
-  // world-unit inner chord per digit (fold annulus input — keeps ik.js unit-clean)
+  // world-unit inner chord + mesh flesh per digit (fold annulus / ground clearance)
   for (const f of FINGERS) {
     const d = digits[f];
     d.innerW = Math.abs(d.L0 - (d.L1 + d.L2)) * scale;
     d.reachW = d.reach * scale;
+    d.flesh = fleshM[f] * scale;
   }
+  const palmDepth = palmDepthM * scale;                       // belly bottom below the wrist
   const WORLD_M = middleReach;                          // meters per world unit (1u ≈ middle reach)
   const G = C.G_SI / WORLD_M;                            // fierce gravity (u/s^2)
 
@@ -208,7 +262,7 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
         mount.updateMatrixWorld(true);
       }
     };
-    mount.position.set(0, 0.45, 0);
+    mount.position.set(0, Math.max(0.5, palmDepth + C.BELLY_CLEAR + 0.02), 0);
     mount.updateMatrixWorld(true);
     const mcpW0 = d.mcp.getWorldPosition(new THREE.Vector3());
     const tipW0 = d.tip.getWorldPosition(new THREE.Vector3());
@@ -224,7 +278,7 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
       alignAxes();
       recapture();
       const mcpW = d.mcp.getWorldPosition(tmp).clone();
-      const drop = mcpW.y - 0.012, ext = C.REST_EXT * d.reachW;
+      const drop = mcpW.y - d.flesh, ext = C.REST_EXT * d.reachW;
       if (ext <= Math.abs(drop)) continue;
       const fwd = Math.max(Math.sqrt(ext * ext - drop * drop), C.REST_MIN_FWD * d.reachW);
       // best err over the SAME lane-angle sweep calibrate() refines with (±1.0 rad) —
@@ -232,7 +286,7 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
       let err = Infinity;
       for (let a = -1.0; a <= 1.0 + 1e-9; a += 0.05) {
         const dir = lane.clone().applyAxisAngle(UP, a);
-        const foot = new THREE.Vector3(mcpW.x + dir.x * fwd, 0.012, mcpW.z + dir.z * fwd);
+        const foot = new THREE.Vector3(mcpW.x + dir.x * fwd, d.flesh, mcpW.z + dir.z * fwd);
         d.yaw = 0;
         solveLeg(d, root.worldToLocal(foot.clone()), { root });
         err = Math.min(err, d.tip.getWorldPosition(tmp).distanceTo(foot));
@@ -266,5 +320,5 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
     d.mcpWorld = d.mcp.getWorldPosition(new THREE.Vector3());
   }
 
-  return { gltf, mount, root, wrist, digits, WORLD_M, G, scale, handedness };
+  return { gltf, mount, root, wrist, digits, WORLD_M, G, scale, handedness, palmDepth };
 }

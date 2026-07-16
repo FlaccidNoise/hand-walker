@@ -310,7 +310,8 @@ function makeSim(rig, calib) {
     // --- SI physics (§4.8) ---
     s.speed = Math.hypot(s.v.x, s.v.z);
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
-    const rideH = cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH;
+    const rideH = Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
+      rig.palmDepth + C.BELLY_CLEAR);
     let N = 0;                                               // support, newtons
     if (!s.airborne && s.planted > 0) {
       const cM = (rideH - body.position.y) * rig.WORLD_M;
@@ -333,10 +334,10 @@ function makeSim(rig, calib) {
       applyBodyPose(); reseedFeet();
     }
     applyBodyPose();
-    // palm/knuckle-dome/wrist-stump bottoms out at the floor and scrapes (§4.8)
-    let pen = 0;
-    for (const j of [rig.wrist, ...FINGERS.map(f => rig.digits[f].mcp)]) {
-      const p = j.getWorldPosition(_a);
+    // palm/stump belly bottoms out at the floor and scrapes (§4.8) — mesh-measured depth
+    let pen = groundY(body.position.x, body.position.z) + rig.palmDepth - body.position.y;
+    for (const f of FINGERS) {
+      const p = rig.digits[f].mcp.getWorldPosition(_a);
       pen = Math.max(pen, groundY(p.x, p.z) + 0.012 - p.y);
     }
     if (pen > 0) {
@@ -437,6 +438,8 @@ function makeSim(rig, calib) {
 function calibrate(rig) {
   const body = rig.mount;
   const tmp = new THREE.Vector3();
+  const bellyFloor = rig.palmDepth + C.BELLY_CLEAR;          // lowest body height with the
+                                                             // palm/stump off the ground
   const setPose = (h, walk) => {
     body.position.set(0, h, 0);
     body.rotation.order = 'YZX';
@@ -462,7 +465,7 @@ function calibrate(rig) {
     const mcpW = rig.root.localToWorld(d.pos.mcp.clone());
     laneDir[f] = new THREE.Vector3(tipW.x - mcpW.x, 0, tipW.z - mcpW.z).normalize();
   }
-  setPose(0.45, false);
+  setPose(Math.max(0.5, bellyFloor + 0.02), false);
   for (const f of FINGERS) {
     const d = rig.digits[f];
     const mcpW = d.mcp.getWorldPosition(tmp).clone();
@@ -480,9 +483,29 @@ function calibrate(rig) {
     }
     if (best !== null) laneDir[f].applyAxisAngle(UP, best);
   }
-  // stance rests at height h (§5): descending diagonals — on the ground at REST_EXT of
-  // reach from the live MCP, ≥REST_MIN_FWD·reach forward of it. Null if a digit's MCP
-  // rides too high to descend that steeply (pins the stance from above — the pinky).
+  // per-digit usable extension: a pronated/bent bind can't straighten to a fixed
+  // fraction of reach (slave coupling) — measure the largest extension the real
+  // solver holds along each refined lane (the thumb holds ~0.88, fingers ~0.92)
+  const restExt = {};
+  setPose(Math.max(0.5, bellyFloor + 0.02), false);
+  for (const f of FINGERS) {
+    const d = rig.digits[f];
+    const mcpW = d.mcp.getWorldPosition(tmp).clone();
+    restExt[f] = 0.6;
+    for (let e = C.REST_EXT; e >= 0.6; e -= 0.02) {
+      const ext = e * d.reachW, drop = mcpW.y - padHeight(d);
+      if (ext <= Math.abs(drop)) continue;
+      const fwd = Math.max(Math.sqrt(ext * ext - drop * drop), C.REST_MIN_FWD * d.reachW);
+      const foot = new THREE.Vector3(mcpW.x + laneDir[f].x * fwd, padHeight(d),
+        mcpW.z + laneDir[f].z * fwd);
+      d.yaw = 0;
+      if (solveTo(d, foot) < 0.8 * C.BAND_TIP_ERR) { restExt[f] = e; break; }
+    }
+  }
+
+  // stance rests at height h (§5): descending diagonals — on the ground at the digit's
+  // usable extension, ≥REST_MIN_FWD·reach forward of the live MCP. Null if a digit's
+  // MCP rides too high to descend that steeply (pins the stance from above).
   const restsAt = (h) => {
     setPose(h, false);
     const out = {};
@@ -490,7 +513,7 @@ function calibrate(rig) {
       const d = rig.digits[f];
       const mcpW = d.mcp.getWorldPosition(tmp);
       const drop = mcpW.y - padHeight(d);
-      const ext = C.REST_EXT * d.reachW;
+      const ext = restExt[f] * d.reachW;
       if (ext * ext <= drop * drop) return null;             // can't descend that steeply
       const fwd = Math.max(Math.sqrt(ext * ext - drop * drop), C.REST_MIN_FWD * d.reachW);
       out[f] = new THREE.Vector3(mcpW.x + laneDir[f].x * fwd, padHeight(d),
@@ -506,6 +529,7 @@ function calibrate(rig) {
   let standH = 0;
   const perDigitH = {};
   for (let h = 1.20; h >= 0.20; h -= 0.002) {
+    if (h < bellyFloor) break;                               // belly would rest on the floor
     const fts = restsAt(h);
     if (!fts) continue;
     feet = fts;
@@ -522,6 +546,7 @@ function calibrate(rig) {
   // offset s, constant lateral z) at the walking pose; keep the contiguous window
   // (holding the rest offset) where tip err < BAND_TIP_ERR ---
   const scanBand = (f, h, step = C.BAND_S_STEP) => {
+    if (h < bellyFloor) return null;
     setPose(h, true);
     const d = rig.digits[f];
     const mcpW = d.mcp.getWorldPosition(tmp);
@@ -544,13 +569,14 @@ function calibrate(rig) {
         - Math.min(Math.abs(b.lo - sRest), Math.abs(b.hi - sRest)))[0]
       ?? null;
   };
-  const walkH = standH * C.POSE_CROUCH + C.POSE_SAG;
+  const walkH = Math.max(standH * C.POSE_CROUCH + C.POSE_SAG, bellyFloor);
 
   // --- walk pitch ("set at rig time from bind geometry"): nose-up pitch about the
   // wrist lifts the knuckle dome (MCPs sit forward of the wrist) and shifts knuckles
   // forward of bind (§4.6). Read-only scan with the real solver (§8): keep the
   // smallest pitch that maximizes the weakest digit's band at the walk pose. ---
-  let bestPitch = 0, bestScore = -1;
+  let bestScore = -1;
+  const pitchScores = [];
   for (let p = -0.3; p <= 0.4 + 1e-9; p += 0.05) {
     C.TUNE.walkPitch = p;
     let score = Infinity;
@@ -559,9 +585,13 @@ function calibrate(rig) {
       score = Math.min(score, b ? b.hi - b.lo : 0);
       if (score === 0) break;
     }
-    if (score > bestScore + 1e-9) { bestScore = score; bestPitch = p; }
+    pitchScores.push({ p, score });
+    if (score > bestScore) bestScore = score;
   }
-  C.TUNE.walkPitch = bestPitch;
+  // flattest pitch within 90% of the best band score — the band-only optimum pegs
+  // nose-down and the hand walks slumped, dome dipping (looks matter: dome up)
+  C.TUNE.walkPitch = pitchScores.filter(s => s.score >= 0.9 * bestScore)
+    .reduce((a, b) => (Math.abs(b.p) < Math.abs(a.p) ? b : a)).p;
 
   const bands = {}, workC = {}, dMin = {};
   for (const f of FINGERS) {
@@ -586,7 +616,9 @@ function calibrate(rig) {
   setPose(standH, false);
   const plantErr = {};
   for (const f of FINGERS) { rig.digits[f].yaw = 0; plantErr[f] = plantDigit(f); }
-  return { standH, walkH, perDigitH, plantErr, feet, bands, workC, dMin, strideMax, bandTable };
+  return { standH, walkH, perDigitH, plantErr, feet, bands, workC, dMin, strideMax, bandTable,
+    // dev/debug handles (mutate the pose — probe use only)
+    laneDir, restExt, restsAt, scanBand, solveTo, setPose, bellyFloor };
 }
 
 function devHUD(fps, rig, sim, calib) {
