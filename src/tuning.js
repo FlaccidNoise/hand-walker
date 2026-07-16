@@ -147,6 +147,9 @@ export const NEIGHBORS = {
 // --- Gestures: pose-track definitions (durations, amplitudes, keyframes) live in
 // src/gestures.js — the def IS the tuning. Authoring rules + refuted approaches
 // (NO body-heading tracks; part-curled digit bases) are documented there.
+export const IDLE_AFTER = 8;          // s sim since last input before idles start —
+                                      // must exceed every QA quiet stretch (rest = 3 s)
+export const IDLE_GAP = 5;            // s sim between idles (±30% jitter)
 
 // --- Handedness: this GLB is a LEFT hand (the severed "Thing"). rig.js derives
 //     axis/signs from the bind pose; HANDEDNESS multiplies lateral quantities so

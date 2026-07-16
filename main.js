@@ -5,7 +5,7 @@ import { buildScene } from './src/scene.js';
 import { buildRig, FINGERS } from './src/rig.js';
 import { solveLeg, applyCurl, resetToBind, tipLocal, groundConstrain, padHeight, foldAnnulus } from './src/ik.js';
 import { groundY } from './src/terrain.js';
-import { GESTURES, sampleTrack } from './src/gestures.js';
+import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import * as C from './src/tuning.js';
@@ -47,7 +47,7 @@ async function init() {
   sim.reset();
 
   const __hand = {
-    rig, scene, camera, controls, dbg, C, THREE,
+    rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES,
     solveLeg, resetToBind, tipLocal, state, calib, sim,
     reset: (...a) => sim.reset(...a),
     autoWalk: (x, z) => sim.autoWalk(x, z),
@@ -123,7 +123,7 @@ function makeSim(rig, calib) {
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', phase: 0, f: 0, speed: 0, planted: 0,
     airborne: false, time: 0,
-    gaitP: {}, gesture: null,
+    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0,
   };
 
   // --- per-gait derived params (§4.5/§4.7): pacer band, patter multipliers, top speed ---
@@ -159,8 +159,11 @@ function makeSim(rig, calib) {
     return { pitch: sampleTrack(b.pitch, u), roll: sampleTrack(b.roll, u),
       heading: 0, height: sampleTrack(b.height, u) };
   }
+  const cancelIdle = () => { if (s.gesture && s.gesture.idle) s.gesture = null; };
+  const markInput = () => { cancelIdle(); s.lastInput = s.time; };
   function gesture(name) {
     const def = GESTURES[name];
+    markInput();
     if (!def || s.airborne || s.speed > C.V_MOVE || s.gesture) return false;
     s.gesture = { name, t: 0, dur: def.dur, def };
     return true;
@@ -365,6 +368,14 @@ function makeSim(rig, calib) {
     if (s.gesture) {
       if (s.airborne || s.speed > C.V_MOVE) s.gesture = null;
       else { s.gesture.t += dt; if (s.gesture.t >= s.gesture.dur) s.gesture = null; }
+    } else if (!s.airborne && s.f === 0 && s.speed <= C.V_MOVE
+        && s.time - s.lastInput > C.IDLE_AFTER && s.time >= s.nextIdleAt) {
+      // left alone: weighted-random subtle idle; any input cancels instantly
+      const names = Object.keys(IDLES);
+      let r = Math.random() * names.reduce((a, n) => a + IDLES[n].w, 0);
+      const name = names.find(n => (r -= IDLES[n].w) <= 0) ?? names[0];
+      s.gesture = { name, t: 0, dur: IDLES[name].dur, def: IDLES[name], idle: true };
+      s.nextIdleAt = s.time + IDLES[name].dur + C.IDLE_GAP * (0.7 + 0.6 * Math.random());
     }
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
     const rideT = Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
@@ -494,6 +505,7 @@ function makeSim(rig, calib) {
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
     s.airborne = false; s.rideH = calib.standH; s.gesture = null;
+    s.lastInput = s.time; s.nextIdleAt = s.time;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();
     for (const f of FINGERS) {
@@ -504,12 +516,14 @@ function makeSim(rig, calib) {
   }
 
   function autoWalk(x, z) {                                  // velocity command, u/s
+    markInput();
     const l = Math.hypot(x, z);
     const k = l > C.V_MAX ? C.V_MAX / l : 1;                 // leash tops out at V_MAX
     s.cmdT.set(x * k, 0, z * k);                             // ramped toward in step()
   }
 
   function jump() {
+    markInput();
     if (s.airborne || s.planted === 0) return;
     // energy-based (§4.8): burst force × push-off stroke × planted − weight × stroke
     const E = (C.F_DIGIT_BURST * s.planted - C.MASS * C.G_SI) * (C.JUMP_STROKE * rig.WORLD_M);
@@ -764,7 +778,7 @@ function devHUD(fps, rig, sim, calib) {
       const l = sim.legs[f];
       return `${f.padEnd(6)} ${l.mode.padEnd(6)} err ${l.err.toFixed(3)}`;
     }),
-    s.gesture ? `<b>gesture</b> ${s.gesture.name} t ${s.gesture.t.toFixed(2)}/${s.gesture.dur}` : '',
+    s.gesture ? `<b>${s.gesture.idle ? 'idle' : 'gesture'}</b> ${s.gesture.name} t ${s.gesture.t.toFixed(2)}/${s.gesture.dur}` : '',
     `WASD walk · Space jump · R reset · \` debug · 1-0 gestures`,
   ];
   return lines.join('\n');

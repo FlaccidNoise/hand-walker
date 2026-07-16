@@ -106,3 +106,20 @@ export const GESTURES = {
         [0.74, -0.15], [0.82, 0.4], [0.88, 0.4], [1, 0]] } },
   },
 };
+
+// idles: subtle low-amplitude fidgets, weighted-random after IDLE_AFTER s without
+// input (see step()); same format, w = pick weight
+const DRUM_BASE = { yaw: 0, mcp: -0.1, pip: 1.1 };
+const DRUM_STROKE = [[0, 0], [0.3, -0.15], [0.55, 0.4], [0.7, 0.4], [1, 0]];
+export const IDLES = {
+  breathe: { w: 4, dur: 3.5, body: { height: osc(2, 0.015) } },
+  shift:   { w: 2, dur: 2.8, body: { roll: osc(1, 0.06) } },
+  drum: {
+    w: 2, dur: 1.5,
+    digits: {
+      index:  { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0, 0.35] },
+      middle: { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.22, 0.57] },
+      ring:   { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.44, 0.79] },
+    },
+  },
+};
