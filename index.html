@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Hand Walker</title>
+<style>
+  html,body { margin:0; height:100%; background:#0c1018; overflow:hidden; font:13px/1.4 ui-monospace,monospace; color:#d8dce6; }
+  #app { position:fixed; inset:0; }
+  #hud { position:fixed; left:8px; top:8px; pointer-events:none; white-space:pre; text-shadow:0 1px 2px #000; }
+  #hud b { color:#8fe0ff; }
+  #help { position:fixed; right:8px; bottom:8px; opacity:.7; text-align:right; }
+  canvas { display:block; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud"></div>
+<div id="help">drag:orbit · WASD:move · space:jump · click hand:grab · ` debug</div>
+<script>
+  // early error capture (before module loads) for diagnostics
+  window.__errs = [];
+  addEventListener('error', e => window.__errs.push('err: ' + (e.error && e.error.stack || e.message)));
+  addEventListener('unhandledrejection', e => window.__errs.push('rej: ' + (e.reason && (e.reason.stack||e.reason.message) || e.reason)));
+  ['log','error','warn'].forEach(k => { const o=console[k]; console[k]=(...a)=>{ window.__errs.push(k+': '+a.map(x=>{try{return typeof x==='object'?JSON.stringify(x):String(x)}catch{return 'obj'}}).join(' ')); o.apply(console,a);}; });
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
