@@ -66,7 +66,7 @@ export function makeBrain(sim, rig, camera) {
       const dx = a.target.x - body.position.x, dz = a.target.z - body.position.z;
       const d = Math.hypot(dx, dz);
       if (d < 0.15) { sim.autoWalk(0, 0); return DONE; }
-      const v = Math.min(a.speed ?? 1.2, Math.max(0.4, 2 * d));  // arrival damping
+      const v = Math.min(a.speed ?? 0.8, Math.max(0.4, 2 * d));  // arrival damping
       sim.autoWalk(dx / d * v, dz / d * v);
       return RUNNING;
     },
@@ -118,7 +118,7 @@ export function makeBrain(sim, rig, camera) {
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
 - {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming)
-- {"do":"walk","forward":F,"right":R} — walk to an offset in YOUR body frame; negative allowed. You end up facing your direction of travel. Units: world units, your body is ~2 long; typical distances 1-6.
+- {"do":"walk","forward":F,"right":R,"speed":S} — walk to an offset in YOUR body frame; negative allowed. You end up facing your direction of travel. Units: world units, your body is ~2 long; typical distances 1-6. "speed" (u/s) sets your pace: ~0.8 (default, relaxed) for a normal walk, ~1.5 for a jog/trot, ~2.2-2.5 for a full run — use a higher speed whenever told to hurry, run, or race, or when the situation is urgent/excited.
 - {"do":"turn","deg":D} — positive = left (you walk a small arc; you cannot pivot in place)
 - {"do":"jump"}
 - {"do":"wait","s":S}
