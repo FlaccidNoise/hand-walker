@@ -57,9 +57,10 @@ async function init() {
   };
   window.__hand = __hand;
 
-  // keyboard: ` debug overlay · p pause · r reset · WASD walk · Space jump · 1/2/3 gestures
+  // keyboard: ` debug overlay · p pause · r reset · WASD walk · Space jump · 1-0 gestures
   const keyVel = { w: [1, 0], s: [-1, 0], a: [0, -1], d: [0, 1] };
-  const gestureKeys = { '1': 'yes', '2': 'no', '3': 'idk' };
+  const gestureKeys = { '1': 'yes', '2': 'no', '3': 'idk', '4': 'wave', '5': 'laugh',
+    '6': 'bow', '7': 'point', '8': 'beckon', '9': 'thinking', '0': 'tap' };
   const down = new Set();
   const applyKeys = () => {
     let x = 0, z = 0;
@@ -764,7 +765,7 @@ function devHUD(fps, rig, sim, calib) {
       return `${f.padEnd(6)} ${l.mode.padEnd(6)} err ${l.err.toFixed(3)}`;
     }),
     s.gesture ? `<b>gesture</b> ${s.gesture.name} t ${s.gesture.t.toFixed(2)}/${s.gesture.dur}` : '',
-    `WASD walk · Space jump · R reset · \` debug · 1/2/3 yes/no/idk`,
+    `WASD walk · Space jump · R reset · \` debug · 1-0 gestures`,
   ];
   return lines.join('\n');
 }

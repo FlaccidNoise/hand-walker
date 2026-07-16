@@ -37,6 +37,8 @@ function osc(cycles, amp, env) {
 }
 
 const CURL = { yaw: 0, mcp: 0, pip: 0.5 };   // lifted part-curled base (the "no" point)
+const WAVE_CURL = { yaw: 0, mcp: -0.25, pip: 0.65 };
+const WAVE_BOB = osc(2, 0.3);
 
 export const GESTURES = {
   yes: { dur: 1.1, body: { pitch: osc(2, 0.16) } },
@@ -51,5 +53,56 @@ export const GESTURES = {
     },
     splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.22, 0.14], [0.55, 0.12], [1, 0]] },
     digits: { thumb: { base: { yaw: 0, mcp: -0.3, pip: 0.55 }, win: [0, 0.75] } },
+  },
+  // hello: fingers lift and bob in a ripple (index→pinky), each re-planting via a
+  // real swing as its window closes
+  wave: {
+    dur: 1.6,
+    digits: {
+      index:  { base: WAVE_CURL, pip: WAVE_BOB, win: [0, 0.4] },
+      middle: { base: WAVE_CURL, pip: WAVE_BOB, win: [0.15, 0.55] },
+      ring:   { base: WAVE_CURL, pip: WAVE_BOB, win: [0.3, 0.7] },
+      pinky:  { base: WAVE_CURL, pip: WAVE_BOB, win: [0.45, 0.85] },
+    },
+  },
+  // giggle: quick body bounces with a pitch jiggle
+  laugh: { dur: 1.3, body: { height: osc(4, 0.05), pitch: osc(4, 0.045) } },
+  // dip forward and hold (positive pitch = stump-down — opposite of idk's rear-back)
+  bow: {
+    dur: 1.5,
+    body: {
+      pitch:  [[0, 0], [0.3, 0.18], [0.65, 0.18], [1, 0]],
+      height: [[0, 0], [0.3, -0.07], [0.65, -0.07], [1, 0]],
+    },
+  },
+  // index raised to a steady forward point, small emphasis bobs
+  point: {
+    dur: 1.2,
+    digits: { index: { base: { yaw: 0, mcp: -0.35, pip: 0.5 },
+      mcp: [[0, 0], [0.3, -0.08], [0.5, 0.02], [0.7, -0.06], [1, 0]] } },
+  },
+  // come here: index curls twice
+  beckon: {
+    dur: 1.4,
+    digits: { index: { base: { yaw: 0, mcp: -0.3, pip: 0.6 },
+      pip: [[0, 0], [0.2, 0.55], [0.4, -0.05], [0.6, 0.55], [0.8, -0.05], [1, 0]] } },
+  },
+  // hmm: slow rear + side tilt while the index taps the air
+  thinking: {
+    dur: 2.0,
+    body: {
+      pitch: [[0, 0], [0.25, -0.07], [0.8, -0.05], [1, 0]],
+      roll:  [[0, 0], [0.25, 0.08], [0.8, 0.06], [1, 0]],
+    },
+    digits: { index: { base: { yaw: 0, mcp: -0.3, pip: 0.7 }, pip: osc(3, 0.18), win: [0.05, 0.9] } },
+  },
+  // impatient: index drums the ground (down-strokes push past stance into the
+  // ground constraint = the tap)
+  tap: {
+    dur: 1.3,
+    digits: { index: { base: { yaw: 0, mcp: -0.1, pip: 1.1 },
+      mcp: [[0, 0], [0.08, -0.15], [0.16, 0.4], [0.22, 0.4], [0.3, -0.15],
+        [0.38, 0.4], [0.44, 0.4], [0.52, -0.15], [0.6, 0.4], [0.66, 0.4],
+        [0.74, -0.15], [0.82, 0.4], [0.88, 0.4], [1, 0]] } },
   },
 };
