@@ -62,11 +62,11 @@ export const V_MOVE = 0.15;
 // ALOFT in trot/run — its band can't service them. Phase offsets keep spatially
 // adjacent digits ≥PHASE_SEP apart (walk ripple: every neighbour pair 0.4 apart). ---
 export const GAITS = {
-  // thumb aloft in ALL moving gaits: with palm-down flexion its forward band at walk
-  // height is a sliver (~0.05) — the spec's own rule ("its band can't service trot")
-  // applies to our walk too. It plants at rest below V_MOVE (the standing Thing look).
-  walk: { duty: 0.78, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: ['thumb'],
-          offsets: { index: 0.0, ring: 0.25, middle: 0.5, pinky: 0.75, thumb: 0.4 } },
+  // thumb WALKS (the solver polish widened its band 0.05 → 0.68; the old benching
+  // rationale is gone) and is carried aloft only in trot/run per §4.7. Walk ripple
+  // keeps every neighbour pair ≥0.4 apart in phase.
+  walk: { duty: 0.78, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: [],
+          offsets: { index: 0.0, ring: 0.2, thumb: 0.4, middle: 0.6, pinky: 0.8 } },
   trot: { duty: 0.62, fMax: 5.5, arcH: 0.22, vCap: 2.1, aloft: ['thumb'],
           offsets: { index: 0.0, ring: 0.0, middle: 0.5, pinky: 0.5, thumb: 0.25 } },
   run:  { duty: 0.50, fMax: 7.0, arcH: 0.24, vCap: Infinity, aloft: ['thumb'],
@@ -77,14 +77,16 @@ export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lowe
 
 // --- Steering / cadence ---
 export const STEER_GAIN = 6;          // yaw-rate gain toward the commanded heading (1/s)
-export const YAW_RATE_MAX = 0.35;     // rad/s — feet sweep yawRate·radius·stanceTime of arc
-                                      // per stance; beyond ~0.1 rad/stance no band absorbs it
-                                      // (a hand pivots deliberately, in small re-steps)
+export const YAW_RATE_MAX = 0.8;      // rad/s — 0.35 predates the polished solver and felt
+                                      // sluggish (user: "incredibly slow to turn"); the
+                                      // rotational cadence term buys the extra re-steps
 // (rotational cadence demand now enters the zero-slip law via calib.rFoot — see main.js)
 export const ACCEL_TAU = 0.12;        // s — velocity-command response time (friction-limited)
-export const CMD_ACCEL = 2.5;         // u/s² — commanded-speed ramp; friction allows ~124 u/s²
+export const CMD_ACCEL = 3.2;         // u/s² — commanded-speed ramp; friction allows ~124 u/s²
                                       // (0→run in 20ms) which strands every planted foot a full
                                       // reach behind. Volition: accelerate at what legs service.
+export const RIDE_TAU = 0.3;          // s — ride-height easing; an instant crouch↔stand step
+                                      // through the support spring reads as a POP at every stop
 
 // --- Swing shaping (§4.6) ---
 export const LANE_CLAMP = 0.09;       // lane half-width, ·reach

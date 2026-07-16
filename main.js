@@ -330,8 +330,10 @@ function makeSim(rig, calib) {
     // --- SI physics (§4.8) ---
     s.speed = Math.hypot(s.v.x, s.v.z);
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
-    const rideH = Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
+    const rideT = Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
       rig.palmDepth + C.BELLY_CLEAR);
+    s.rideH += (rideT - s.rideH) * (1 - Math.exp(-dt / C.RIDE_TAU)); // eased — no stop-pop
+    const rideH = s.rideH;
     let N = 0;                                               // support, newtons
     if (!s.airborne && s.planted > 0) {
       const cM = (rideH - body.position.y) * rig.WORLD_M;
@@ -439,7 +441,7 @@ function makeSim(rig, calib) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
-    s.airborne = false;
+    s.airborne = false; s.rideH = calib.standH;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();
     for (const f of FINGERS) {
