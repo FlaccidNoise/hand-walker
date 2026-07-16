@@ -220,8 +220,9 @@ function makeSim(rig, calib) {
     // systematically stale (drained bands when walking, swept lanes when turning §4.6)
     const sLand = M.clamp((band.lo + band.hi) / 2 + 0.5 * stanceDist,
       band.lo + C.BAND_MARGIN, band.hi - C.BAND_MARGIN);
-    const zLand = M.clamp(calib.feet[f].z + vLoc.z * 0.5 * stanceTime,
-      calib.feet[f].z - d.reachW * C.LANE_CLAMP, calib.feet[f].z + d.reachW * C.LANE_CLAMP);
+    const lz = calib.laneZ[f] ?? calib.feet[f].z;            // yaw-centred walking lane
+    const zLand = M.clamp(lz + vLoc.z * 0.5 * stanceTime,
+      lz - d.reachW * C.LANE_CLAMP, lz + d.reachW * C.LANE_CLAMP);
     // NOTE: no 0.72·reach cap here — the ORIGINAL's proxy for live-height reachability
     // contradicts this stance (rests at 0.92·reach) and pulled land targets airborne.
     // The band clamp above IS the live-height capability (scanned at ground height
@@ -388,7 +389,7 @@ function makeSim(rig, calib) {
         const mcpHX = worldToHand(d2.mcp.getWorldPosition(_a), _b).x;
         const fh = worldToHand(leg.foot, _b);
         const sFoot = fh.x - mcpHX;
-        const zOff = Math.abs(fh.z - calib.feet[f].z);
+        const zOff = Math.abs(fh.z - (calib.laneZ[f] ?? calib.feet[f].z));
         const band = bandAt(f, body.position.y);
         if ((band && sFoot < band.lo - 0.02)
           || zOff > 2 * d2.reachW * C.LANE_CLAMP
@@ -552,7 +553,7 @@ function calibrate(rig) {
   // --- stance bands: scan each leg's foot along its lane (MCP-relative forward
   // offset s, constant lateral z) at the walking pose; keep the contiguous window
   // (holding the rest offset) where tip err < BAND_TIP_ERR ---
-  const scanBand = (f, h, step = C.BAND_S_STEP) => {
+  const scanBand = (f, h, step = C.BAND_S_STEP, laneZOverride = null) => {
     if (h < bellyFloor) return null;
     setPose(h, true);
     const d = rig.digits[f];
@@ -560,7 +561,7 @@ function calibrate(rig) {
     if (mcpW.y < padHeight(d)) return null;
     const mcpX = mcpW.x;
     const sRest = feet[f].x - mcpX;                          // the stance the leg actually uses
-    const target = new THREE.Vector3(0, padHeight(d), feet[f].z);
+    const target = new THREE.Vector3(0, padHeight(d), laneZOverride ?? feet[f].z);
     d.yaw = 0;                                               // deterministic branch seed
     const runs = []; let cur = null;
     for (let s = C.BAND_S_MIN; s <= C.BAND_S_MAX + 1e-9; s += step) {
@@ -606,6 +607,28 @@ function calibrate(rig) {
     workC[f] = bands[f] ? (bands[f].lo + bands[f].hi) / 2 : null;
     dMin[f] = foldAnnulus(rig.digits[f]);
   }
+
+  // walking lane z per digit: the z that zeroes the ab/adduction yaw at the band
+  // centre. Stance tip error grows ∝|yaw| (irreducible hinge-axis elevation), and a
+  // rest-z lane runs the yaw one-sided across the sweep — the tip scrubs the error
+  // gradient. A yaw-centred lane makes the residual symmetric, so NET scrub cancels.
+  const laneZ = {};
+  for (const f of FINGERS) {
+    const d = rig.digits[f];
+    laneZ[f] = feet[f].z;
+    if (!workC[f]) continue;
+    setPose(walkH, true);
+    const mcpW = d.mcp.getWorldPosition(tmp).clone();
+    let best = Infinity;
+    for (let z = feet[f].z - 0.15; z <= feet[f].z + 0.15 + 1e-9; z += 0.01) {
+      d.yaw = 0;
+      solveTo(d, new THREE.Vector3(mcpW.x + workC[f], padHeight(d), z));
+      if (Math.abs(d.yaw) < best) { best = Math.abs(d.yaw); laneZ[f] = z; }
+    }
+    // re-scan the band on the final lane (it shifts slightly off the rest z)
+    bands[f] = scanBand(f, walkH, C.BAND_S_STEP, laneZ[f]) ?? bands[f];
+    workC[f] = bands[f] ? (bands[f].lo + bands[f].hi) / 2 : workC[f];
+  }
   const strideMax = Math.min(...FINGERS.map(f => bands[f] ? bands[f].hi - bands[f].lo : 0));
 
   // --- per-height band table (§4.4): each landing queries the band at the height the
@@ -615,7 +638,7 @@ function calibrate(rig) {
     const h = walkH - C.BAND_HEIGHT_RANGE
       + (2 * C.BAND_HEIGHT_RANGE * i) / (C.BAND_HEIGHT_SAMPLES - 1);
     const row = { h };
-    for (const f of FINGERS) row[f] = scanBand(f, h);
+    for (const f of FINGERS) row[f] = scanBand(f, h, C.BAND_S_STEP, laneZ[f]);
     bandTable.push(row);
   }
 
@@ -623,7 +646,7 @@ function calibrate(rig) {
   setPose(standH, false);
   const plantErr = {};
   for (const f of FINGERS) { rig.digits[f].yaw = 0; plantErr[f] = plantDigit(f); }
-  return { standH, walkH, perDigitH, plantErr, feet, bands, workC, dMin, strideMax, bandTable,
+  return { standH, walkH, perDigitH, plantErr, feet, laneZ, bands, workC, dMin, strideMax, bandTable,
     // dev/debug handles (mutate the pose — probe use only)
     laneDir, restExt, restsAt, scanBand, solveTo, setPose, bellyFloor };
 }
