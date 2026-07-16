@@ -5,6 +5,7 @@ import { buildScene } from './src/scene.js';
 import { buildRig, FINGERS } from './src/rig.js';
 import { solveLeg, applyCurl, resetToBind, tipLocal, groundConstrain, padHeight, foldAnnulus } from './src/ik.js';
 import { groundY } from './src/terrain.js';
+import { GESTURES, sampleTrack } from './src/gestures.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import * as C from './src/tuning.js';
@@ -147,25 +148,20 @@ function makeSim(rig, calib) {
   const worldToHand = (p, out) => out.copy(p)
     .sub(_c.set(body.position.x, 0, body.position.z)).applyAxisAngle(UP, -s.heading);
   // gesture engine (buddy vocabulary): a timed pose-script layer over the standing
-  // stance. Body-pose offsets only — planted legs re-solve to their pinned world
-  // feet every frame, so pitch/heading/height offsets are automatically absorbed;
-  // no digit work here except idk's brief sepBias splay (see step()).
+  // stance. Body-pose offsets absorb automatically (planted legs re-solve to their
+  // pinned world feet every frame); digits via pose tracks in src/gestures.js.
   const NO_GESTURE = { pitch: 0, roll: 0, heading: 0, height: 0 };
   function gesturePose() {
-    const g = s.gesture;
-    if (!g) return NO_GESTURE;
+    const g = s.gesture, b = g && g.def.body;
+    if (!b) return NO_GESTURE;
     const u = g.t / g.dur;
-    const fade = Math.sin(Math.PI * u);                        // 0→1→0 smooth envelope
-    if (g.name === 'yes')
-      return { pitch: fade * Math.sin(2 * Math.PI * C.YES_CYCLES * u) * C.YES_PITCH_AMP, roll: 0, heading: 0, height: 0 };
-    if (g.name === 'no') return NO_GESTURE;                    // pure digit gesture — see the index wag in step()
-    if (g.name === 'idk')
-      return { pitch: -fade * C.IDK_PITCH_AMP, roll: 0, heading: 0, height: fade * C.IDK_HEIGHT_AMP };
-    return NO_GESTURE;
+    return { pitch: sampleTrack(b.pitch, u), roll: sampleTrack(b.roll, u),
+      heading: 0, height: sampleTrack(b.height, u) };
   }
   function gesture(name) {
-    if (s.gesture || s.airborne || s.speed > C.V_MOVE || !C.GESTURE_DUR[name]) return false;
-    s.gesture = { name, t: 0, dur: C.GESTURE_DUR[name] };
+    const def = GESTURES[name];
+    if (!def || s.airborne || s.speed > C.V_MOVE || s.gesture) return false;
+    s.gesture = { name, t: 0, dur: def.dur, def };
     return true;
   }
   const applyBodyPose = () => {
@@ -298,12 +294,14 @@ function makeSim(rig, calib) {
   // aloft (moving-gait thumb): carried lifted, bears no weight (§4.7). Mild curl —
   // a deep tuck meant long, fast transitions every start/stop (the visible jank)
   const ALOFT = { yaw: 0, mcp: -0.15, pip: 0.9, dip: M.clamp(0.9 * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
-  // "no" gesture: index lifts to a near-straight point and wags yaw — a single digit,
-  // its own local anatomical cone, no coupling to body pose or the other four legs.
-  const WAG_BASE = { yaw: 0, mcp: 0, pip: 0.5, dip: M.clamp(0.5 * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
-  function wagPose(t, dur) {
-    const u = t / dur, fade = Math.sin(Math.PI * u);
-    return { ...WAG_BASE, yaw: fade * Math.sin(2 * Math.PI * C.NO_CYCLES * u) * C.NO_WAG_AMP };
+  // gesture digit: sample the finger's pose tracks (base + offsets, u re-normalized
+  // to the win window) — one digit, its own local anatomical cone, no gait coupling
+  function gestureDigitPose(gd, u, win) {
+    const uu = (u - win[0]) / (win[1] - win[0]);
+    const pip = gd.base.pip + sampleTrack(gd.pip, uu);
+    return { yaw: gd.base.yaw + sampleTrack(gd.yaw, uu),
+      mcp: gd.base.mcp + sampleTrack(gd.mcp, uu),
+      pip, dip: M.clamp(pip * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
   }
   function poseLeg(f, pose, rate, dt) {
     const d = rig.digits[f], leg = legs[f];
@@ -369,9 +367,11 @@ function makeSim(rig, calib) {
     }
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
     const rideT = Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
-      rig.palmDepth + C.BELLY_CLEAR) + gesturePose().height;
+      rig.palmDepth + C.BELLY_CLEAR);
     s.rideH += (rideT - s.rideH) * (1 - Math.exp(-dt / C.RIDE_TAU)); // eased — no stop-pop
-    const rideH = s.rideH;
+    // gesture height rides OUTSIDE the ease: RIDE_TAU smears a snappy shrug flat;
+    // the support spring is the physical smoother
+    const rideH = s.rideH + gesturePose().height;
     let N = 0;                                               // support, newtons
     if (!s.airborne && s.planted > 0) {
       const cM = (rideH - body.position.y) * rig.WORLD_M;
@@ -429,10 +429,11 @@ function makeSim(rig, calib) {
     // The sepBias solver channel and per-digit yawZSign (measured in calibrate) stay
     // for a swing-landing-only separation approach.
     for (const f of FINGERS) legs[f].sepBias = 0;
-    if (s.gesture && s.gesture.name === 'idk') {               // brief splay: reuses the
-      const fade = Math.sin(Math.PI * s.gesture.t / s.gesture.dur); // §4.9 sepBias channel
-      for (const f of ['index', 'pinky'])
-        legs[f].sepBias = C.IDK_SPLAY * fade * (rig.digits[f].yawZSign ?? 1);
+    const sp = s.gesture && s.gesture.def.splay;               // gesture splay: reuses the
+    if (sp) {                                                  // §4.9 sepBias channel
+      const v = sampleTrack(sp.track, s.gesture.t / s.gesture.dur);
+      for (const f of sp.fingers)
+        legs[f].sepBias = v * (rig.digits[f].yawZSign ?? 1);
     }
 
     // --- legs ---
@@ -440,8 +441,12 @@ function makeSim(rig, calib) {
     for (const f of FINGERS) {
       const leg = legs[f];
       if (s.airborne) { leg.mode = 'tuck'; tuckLeg(f, dt); continue; }
-      if (f === 'index' && s.gesture && s.gesture.name === 'no') {  // "no": index wags, bears no weight
-        leg.mode = 'gesture'; poseLeg(f, wagPose(s.gesture.t, s.gesture.dur), C.RATE_CARRY, dt); continue;
+      const gdig = s.gesture && s.gesture.def.digits && s.gesture.def.digits[f];
+      if (gdig) {                                              // gesture digit: lifted, bears no weight
+        const u = s.gesture.t / s.gesture.dur, win = gdig.win ?? [0, 1];
+        if (u >= win[0] && u < win[1]) {
+          leg.mode = 'gesture'; poseLeg(f, gestureDigitPose(gdig, u, win), C.RATE_CARRY, dt); continue;
+        }
       }
       if (gd.aloft.includes(f) && s.speed > C.V_MOVE) {      // aloft only while moving (§4.7)
         leg.mode = 'aloft'; poseLeg(f, ALOFT, C.RATE_CARRY, dt); continue;
