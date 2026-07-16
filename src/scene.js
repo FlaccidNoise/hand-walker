@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { OBSTACLES } from './terrain.js';
 
 export function buildScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -46,7 +47,7 @@ export function buildScene(container) {
   scene.add(key);
   scene.add(new THREE.AmbientLight(0x404858, 0.4));
 
-  const ground = rebuildGround(0);
+  const ground = rebuildGround();
   scene.add(ground.group);
 
   const onResize = () => {
@@ -59,8 +60,10 @@ export function buildScene(container) {
   return { renderer, scene, camera, controls, ground, pmrem, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
 }
 
-// ground: a flat plane + a grid. terrain.js owns groundY(); here only visuals.
-export function rebuildGround(terrainAmp = 0) {
+// ground: a flat plane + a grid + a box mesh per terrain.js OBSTACLES entry (the
+// mesh must exist or a physically-traversable step is an invisible one — same
+// "invisible gym" trap as the refuted slope approach, §7).
+export function rebuildGround() {
   const group = new THREE.Group();
   const size = 60, seg = 1;
   const geo = new THREE.PlaneGeometry(size, size, seg, seg);
@@ -72,5 +75,13 @@ export function rebuildGround(terrainAmp = 0) {
   const grid = new THREE.GridHelper(size, Math.round(size), 0x3a4458, 0x222838);
   grid.position.y = 0.0005;
   group.add(grid);
+  const stepMat = new THREE.MeshStandardMaterial({ color: 0x384258, roughness: 0.9, metalness: 0.0 });
+  for (const o of OBSTACLES) {
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(o.x1 - o.x0, o.h, o.z1 - o.z0), stepMat);
+    box.position.set((o.x0 + o.x1) / 2, o.h / 2, (o.z0 + o.z1) / 2);
+    box.castShadow = true; box.receiveShadow = true;
+    group.add(box);
+  }
   return { group, mesh };
 }
