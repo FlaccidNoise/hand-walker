@@ -52,15 +52,38 @@ export const V_MAX = 2.6;             // u/s leash / gamepad top (walk→run)
 // --- Speed crossover V_MOVE: aloft only active while speed > this ---
 export const V_MOVE = 0.15;
 
-// --- Gaits (§4.7): walk→trot→run selected by commanded speed, like a dog ---
-//      [duty, vTop(Hz of cadence), arcH(ask), pairs[]|ripple]
+// --- Gaits (§4.7): walk→trot→run selected by commanded speed, like a dog. fMax is the
+// gait's cadence ceiling (Hz); its top SPEED derives from calibration (cadence law ×
+// pacer band), clamped by vCap so all three gaits live inside 0..V_MAX. Thumb carried
+// ALOFT in trot/run — its band can't service them. Phase offsets keep spatially
+// adjacent digits ≥PHASE_SEP apart (walk ripple: every neighbour pair 0.4 apart). ---
 export const GAITS = {
-  walk: { duty: 0.78, vTop: 3.0,  arcH: 0.18, downAt: 0 },
-  trot: { duty: 0.62, vTop: 5.5,  arcH: 0.22, downAt: 3.0 },
-  run:  { duty: 0.50, vTop: 7.0,  arcH: 0.24, downAt: 5.5 },
+  walk: { duty: 0.78, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: [],
+          offsets: { index: 0.0, ring: 0.2, thumb: 0.4, middle: 0.6, pinky: 0.8 } },
+  trot: { duty: 0.62, fMax: 5.5, arcH: 0.22, vCap: 2.1, aloft: ['thumb'],
+          offsets: { index: 0.0, ring: 0.0, middle: 0.5, pinky: 0.5, thumb: 0.25 } },
+  run:  { duty: 0.50, fMax: 7.0, arcH: 0.24, vCap: Infinity, aloft: ['thumb'],
+          offsets: { index: 0.0, ring: 0.0, middle: 0.5, pinky: 0.5, thumb: 0.25 } },
 };
+export const GAIT_ORDER = ['walk', 'trot', 'run'];
 export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lower gait's vTop exactly (§4.7)
-export const TROT_PAIRS = [['index','ring'], ['middle','pinky']]; // thumb carried aloft in trot
+
+// --- Steering / cadence ---
+export const STEER_GAIN = 6;          // yaw-rate gain toward the commanded heading (1/s)
+export const YAW_RATE_MAX = 3;        // rad/s
+export const CAD_YAW_GAIN = 0.5;      // cadence rise per |yaw rate| — turning consumes band (§4.5)
+export const ACCEL_TAU = 0.12;        // s — velocity-command response time (friction-limited)
+
+// --- Swing shaping (§4.6) ---
+export const SWING_LAND_FRAC = 0.72;  // land inside 0.72·padReach at the live height
+export const LANE_CLAMP = 0.09;       // lane half-width, ·reach
+export const BAND_MARGIN = 0.03;      // keep landings this far inside the band edges
+export const FOLD_K = 0.6;            // rad of extra PIP curl at peak stepping fold
+export const RESCUE_DUR = 0.16;       // s — rescue swings take at least this
+export const RESCUE_HOLD = 0.55;      // rescue holds the fold until t=0.55
+
+// --- Jump (§4.8, energy-based) ---
+export const JUMP_STROKE = 0.12;      // world units of push-off stroke
 
 // --- Joint rate limits (rad/s): cap the solve, NEVER the constraint (§4.3) ---
 export const RATE_PLANTED = 16;
