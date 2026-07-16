@@ -151,6 +151,15 @@ export const IDLE_AFTER = 8;          // s sim since last input before idles sta
                                       // must exceed every QA quiet stretch (rest = 3 s)
 export const IDLE_GAP = 5;            // s sim between idles (±30% jitter)
 
+// --- Pivot-in-place (turn-nimbly): decoupled from the walk-and-turn steering above.
+// Landing math has its own branch in startSwing (rest foot rotated to the predicted
+// touchdown heading) — the existing translation drift-compensation formula's lateral
+// lane clamp (LANE_CLAMP) saturates under a fast yaw rate regardless of translation,
+// so reusing it unchanged would throttle a pivot the same way it throttles turnCycle.
+export const PIVOT_GAIN = 6;          // 1/s, proportional heading-error gain
+export const PIVOT_YAW_MAX = 2.2;     // rad/s — scan-verify via probe.mjs, not assumed
+export const PIVOT_DONE_EPS = 0.03;   // rad (~1.7°) heading error to call a pivot done
+
 // --- Handedness: this GLB is a LEFT hand (the severed "Thing"). rig.js derives
 //     axis/signs from the bind pose; HANDEDNESS multiplies lateral quantities so
 //     a right hand is a sign flip away. -1 = left (default).

@@ -55,6 +55,7 @@ async function init() {
     autoWalk: (x, z) => sim.autoWalk(x, z),
     jump: () => sim.jump(),
     gesture: (name) => sim.gesture(name),
+    pivot: (deg) => sim.pivot(deg),
     get airborne() { return sim.s.airborne; },
   };
   window.__hand = __hand;
@@ -148,7 +149,7 @@ function makeSim(rig, calib) {
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', phase: 0, f: 0, speed: 0, planted: 0,
     airborne: false, time: 0,
-    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0,
+    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null,
   };
 
   // --- per-gait derived params (§4.5/§4.7): pacer band, patter multipliers, top speed ---
@@ -189,8 +190,20 @@ function makeSim(rig, calib) {
   function gesture(name) {
     const def = GESTURES[name];
     markInput();
-    if (!def || s.airborne || s.speed > C.V_MOVE || s.gesture) return false;
+    if (!def || s.airborne || s.speed > C.V_MOVE || s.gesture || s.pivotTarget != null) return false;
     s.gesture = { name, t: 0, dur: def.dur, def };
+    return true;
+  }
+  // pivot-in-place: rotate to face a new heading with zero translation. Distinct
+  // from steering (which only turns while cmdSpeed>V_MOVE, i.e. walk-and-turn) —
+  // this drives yawRate directly at rest, and startSwing gets a dedicated
+  // rotation-only landing target (§ see startSwing) instead of the translation
+  // drift-compensation math, whose lane clamp saturates under a fast pure yaw rate
+  // exactly like it does for continuous walk-turn (re-derived, not assumed).
+  function pivot(deg) {
+    markInput();
+    if (s.airborne || s.speed > C.V_MOVE || s.gesture || s.pivotTarget != null) return false;
+    s.pivotTarget = M.wrapAngle(s.heading + deg * Math.PI / 180);
     return true;
   }
   const applyBodyPose = () => {
@@ -258,6 +271,16 @@ function makeSim(rig, calib) {
     const rescue = sFrom < band.lo - 0.05;                   // started deep behind the band
     const dur = M.clamp(Math.max((1 - dutyEff()) / Math.max(s.f, 1e-3),
       C.SWING_MIN, rescue ? C.RESCUE_DUR : 0), C.SWING_MIN, 0.2);
+    if (s.pivotTarget != null) {                             // pivot: rest foot rotated to the
+      const predHeading = s.heading + s.yawRate * dur;       // PREDICTED touchdown heading —
+      const landW = new THREE.Vector3().copy(calib.feet[f])  // same predictive idea as the
+        .applyAxisAngle(UP, predHeading)                      // translation path (§4.6), just
+        .add(_c.set(body.position.x + s.v.x * dur, 0, body.position.z + s.v.z * dur));
+      landW.y = groundY(landW.x, landW.z) + padHeight(d);
+      leg.swing = { from: leg.foot.clone(), to: landW, t: 0, dur, rescue };
+      leg.mode = 'swing';
+      return;
+    }
     if (s.f === 0) {                                         // idle settle: go to the
       const landW = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // VALIDATED rest
       landW.y = groundY(landW.x, landW.z) + padHeight(d);
@@ -376,16 +399,28 @@ function makeSim(rig, calib) {
     const cmdSpeed = Math.hypot(s.cmd.x, s.cmd.z);
 
     // --- steering ---
-    if (cmdSpeed > C.V_MOVE && !s.airborne) {
+    if (s.airborne) s.pivotTarget = null;                    // a jump interrupts a pivot
+    if (s.pivotTarget != null) {                              // pivot-in-place: decoupled from
+      const err = M.wrapAngle(s.pivotTarget - s.heading);     // the cmdSpeed gate below — turns
+      if (Math.abs(err) < C.PIVOT_DONE_EPS) { s.pivotTarget = null; s.yawRate = 0; }
+      else s.yawRate = M.clamp(C.PIVOT_GAIN * err, -C.PIVOT_YAW_MAX, C.PIVOT_YAW_MAX);
+    } else if (cmdSpeed > C.V_MOVE && !s.airborne) {
       const hd = Math.atan2(-s.cmd.z, s.cmd.x);
       s.yawRate = M.clamp(C.STEER_GAIN * M.wrapAngle(hd - s.heading), -C.YAW_RATE_MAX, C.YAW_RATE_MAX);
     } else s.yawRate *= Math.exp(-6 * dt);
     s.heading = M.wrapAngle(s.heading + s.yawRate * dt);
 
     // --- gait selection by commanded speed with hysteresis (§4.7) ---
+    // pivoting has zero cmdSpeed but real rotational cadence demand (|yawRate|·rFoot,
+    // the same term the phase engine below already uses) — without this, gait stays
+    // stuck at walk's fMax=3.0 ceiling regardless of yaw rate, so cadence SATURATES
+    // while sweep-per-stance keeps growing with yaw rate past that saturation point
+    // (measured: yawRate 1.6-2.2 both blow stance err to 0.38-0.57, worse at higher
+    // rate, exactly as fMax-saturated sweep = yawRate·(duty/fMax) predicts).
+    const gaitDemand = s.pivotTarget != null ? Math.abs(s.yawRate) * calib.rFoot : cmdSpeed;
     const gi = C.GAIT_ORDER.indexOf(s.gait);
-    if (gi < 2 && cmdSpeed > s.gaitP[s.gait].vTop + C.GAIT_HYST) s.gait = C.GAIT_ORDER[gi + 1];
-    else if (gi > 0 && cmdSpeed < s.gaitP[C.GAIT_ORDER[gi - 1]].vTop) s.gait = C.GAIT_ORDER[gi - 1];
+    if (gi < 2 && gaitDemand > s.gaitP[s.gait].vTop + C.GAIT_HYST) s.gait = C.GAIT_ORDER[gi + 1];
+    else if (gi > 0 && gaitDemand < s.gaitP[C.GAIT_ORDER[gi - 1]].vTop) s.gait = C.GAIT_ORDER[gi - 1];
 
     // --- SI physics (§4.8) ---
     s.speed = Math.hypot(s.v.x, s.v.z);
@@ -529,7 +564,7 @@ function makeSim(rig, calib) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
-    s.airborne = false; s.rideH = calib.standH; s.gesture = null;
+    s.airborne = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null;
     s.lastInput = s.time; s.nextIdleAt = s.time;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();
@@ -557,7 +592,7 @@ function makeSim(rig, calib) {
     s.airborne = true;
   }
 
-  return { s, legs, step, reset, autoWalk, jump, bandAt, gesture };
+  return { s, legs, step, reset, autoWalk, jump, bandAt, gesture, pivot };
 }
 
 // --- calibrate() — §4.4 stance-band calibration, THE load-bearing scan. ---

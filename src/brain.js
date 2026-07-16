@@ -3,7 +3,8 @@
 // so every locomotion invariant (ramping, steering, gesture gating) applies.
 // Plan: [{do:'walk',forward,right,speed?}, {do:'turn',deg}, {do:'gesture',name},
 //        {do:'jump'}, {do:'wait',s}] — hand frame: forward = +heading, right = 90° cw.
-// There is no pivot-in-place gait (turnCycle red): 'turn' walks a small arc.
+// 'turn' pivots in place (sim.pivot) — a separate gait from continuous walk-and-turn,
+// which stays limited by the anatomical finger-yaw cone (turnCycle red-by-choice).
 import * as C from './tuning.js';
 import * as M from './math.js';
 
@@ -70,13 +71,13 @@ export function makeBrain(sim, rig, camera) {
       sim.autoWalk(dx / d * v, dz / d * v);
       return RUNNING;
     },
-    turn(a) {                                            // walk-arc toward the new heading
-      if (a.targetH == null) a.targetH = M.wrapAngle(sim.s.heading + (a.deg ?? 90) * Math.PI / 180);
-      const err = M.wrapAngle(a.targetH - sim.s.heading);
-      if (Math.abs(err) < 0.12) { sim.autoWalk(0, 0); return DONE; }
-      const dir = sim.s.heading + M.clamp(err, -0.9, 0.9);
-      sim.autoWalk(Math.cos(dir) * 0.5, -Math.sin(dir) * 0.5);
-      return RUNNING;
+    turn(a) {                                            // pivot-in-place, zero translation
+      if (!a.started) {
+        if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
+        if (!sim.pivot(a.deg ?? 90)) throw 'pivot refused (busy)';
+        a.started = true; return RUNNING;
+      }
+      return sim.s.pivotTarget != null ? RUNNING : DONE;
     },
   };
   const TIMEOUT = {
@@ -84,7 +85,7 @@ export function makeBrain(sim, rig, camera) {
     jump: () => 5,
     gesture: () => 8,
     walk: (a) => 4 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),
-    turn: (a) => 4 + Math.abs(a.deg ?? 90) / 30,
+    turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
   };
 
   function run(plan) {
@@ -119,7 +120,7 @@ Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
 - {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming)
 - {"do":"walk","forward":F,"right":R,"speed":S} — walk to an offset in YOUR body frame; negative allowed. You end up facing your direction of travel. Units: world units, your body is ~2 long; typical distances 1-6. "speed" (u/s) sets your pace: ~0.8 (default, relaxed) for a normal walk, ~1.5 for a jog/trot, ~2.2-2.5 for a full run — use a higher speed whenever told to hurry, run, or race, or when the situation is urgent/excited.
-- {"do":"turn","deg":D} — positive = left (you walk a small arc; you cannot pivot in place)
+- {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
 - {"do":"jump"}
 - {"do":"wait","s":S}
 Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT (tiny robot voice) — only when a gesture cannot carry the answer.
