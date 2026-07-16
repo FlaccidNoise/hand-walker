@@ -144,6 +144,23 @@ export const NEIGHBORS = {
   pinky:  ['ring'],
 };
 
+// --- Gestures: timed pose-script layer over the standing stance (buddy vocabulary).
+// Body-pose offsets only — planted legs re-solve to their pinned world feet every
+// frame, so pitch/heading/height changes are automatically absorbed (§ HANDOFF).
+export const GESTURE_DUR = { yes: 1.1, no: 1.3, idk: 1.6 };   // s, sim time
+export const YES_PITCH_AMP = 0.16;    // rad, body pitch bob about the wrist
+export const YES_CYCLES = 2;
+// No: heading-wiggle-with-planted-feet was A/B'd and REFUTED — a ±0.25 rad body
+// heading swing while feet stay world-pinned drives stance IK error to ~0.06 (past
+// the 0.05 rescue threshold), firing real re-swings on every digit. Same anatomical
+// ±0.3 rad finger-yaw-cone wall that makes turnCycle the one red QA scenario. Index
+// wags instead — one digit, its own local yaw, no coupling to the gait solver.
+export const NO_WAG_AMP = 0.28;       // rad, index yaw wag (just inside YAW_MAX_FINGER)
+export const NO_CYCLES = 3;
+export const IDK_HEIGHT_AMP = 0.08;   // world units, shrug rise
+export const IDK_PITCH_AMP = 0.08;    // rad, pitch back
+export const IDK_SPLAY = 0.14;        // rad, index/pinky sepBias splay at peak
+
 // --- Handedness: this GLB is a LEFT hand (the severed "Thing"). rig.js derives
 //     axis/signs from the bind pose; HANDEDNESS multiplies lateral quantities so
 //     a right hand is a sign flip away. -1 = left (default).

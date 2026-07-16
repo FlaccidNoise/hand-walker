@@ -51,12 +51,14 @@ async function init() {
     reset: (...a) => sim.reset(...a),
     autoWalk: (x, z) => sim.autoWalk(x, z),
     jump: () => sim.jump(),
+    gesture: (name) => sim.gesture(name),
     get airborne() { return sim.s.airborne; },
   };
   window.__hand = __hand;
 
-  // keyboard: ` debug overlay · p pause · r reset · WASD walk · Space jump
+  // keyboard: ` debug overlay · p pause · r reset · WASD walk · Space jump · 1/2/3 gestures
   const keyVel = { w: [1, 0], s: [-1, 0], a: [0, -1], d: [0, 1] };
+  const gestureKeys = { '1': 'yes', '2': 'no', '3': 'idk' };
   const down = new Set();
   const applyKeys = () => {
     let x = 0, z = 0;
@@ -70,6 +72,7 @@ async function init() {
     if (k === 'p') state.paused = !state.paused;
     if (k === 'r') sim.reset();
     if (k === ' ') sim.jump();
+    if (gestureKeys[k]) sim.gesture(gestureKeys[k]);
     if (keyVel[k]) { down.add(k); applyKeys(); }
   });
   addEventListener('keyup', (e) => {
@@ -118,7 +121,7 @@ function makeSim(rig, calib) {
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', phase: 0, f: 0, speed: 0, planted: 0,
     airborne: false, time: 0,
-    gaitP: {},
+    gaitP: {}, gesture: null,
   };
 
   // --- per-gait derived params (§4.5/§4.7): pacer band, patter multipliers, top speed ---
@@ -143,9 +146,32 @@ function makeSim(rig, calib) {
     .add(_c.set(body.position.x, 0, body.position.z));
   const worldToHand = (p, out) => out.copy(p)
     .sub(_c.set(body.position.x, 0, body.position.z)).applyAxisAngle(UP, -s.heading);
+  // gesture engine (buddy vocabulary): a timed pose-script layer over the standing
+  // stance. Body-pose offsets only — planted legs re-solve to their pinned world
+  // feet every frame, so pitch/heading/height offsets are automatically absorbed;
+  // no digit work here except idk's brief sepBias splay (see step()).
+  const NO_GESTURE = { pitch: 0, roll: 0, heading: 0, height: 0 };
+  function gesturePose() {
+    const g = s.gesture;
+    if (!g) return NO_GESTURE;
+    const u = g.t / g.dur;
+    const fade = Math.sin(Math.PI * u);                        // 0→1→0 smooth envelope
+    if (g.name === 'yes')
+      return { pitch: fade * Math.sin(2 * Math.PI * C.YES_CYCLES * u) * C.YES_PITCH_AMP, roll: 0, heading: 0, height: 0 };
+    if (g.name === 'no') return NO_GESTURE;                    // pure digit gesture — see the index wag in step()
+    if (g.name === 'idk')
+      return { pitch: -fade * C.IDK_PITCH_AMP, roll: 0, heading: 0, height: fade * C.IDK_HEIGHT_AMP };
+    return NO_GESTURE;
+  }
+  function gesture(name) {
+    if (s.gesture || s.airborne || s.speed > C.V_MOVE || !C.GESTURE_DUR[name]) return false;
+    s.gesture = { name, t: 0, dur: C.GESTURE_DUR[name] };
+    return true;
+  }
   const applyBodyPose = () => {
+    const g = gesturePose();
     body.rotation.order = 'YZX';
-    body.rotation.set(C.TUNE.walkRoll, s.heading, C.TUNE.walkPitch);
+    body.rotation.set(C.TUNE.walkRoll + g.roll, s.heading + g.heading, C.TUNE.walkPitch + g.pitch);
     rig.root.updateMatrixWorld(true);
   };
   const dutyEff = () => 1 - Math.min(0.9,
@@ -272,6 +298,13 @@ function makeSim(rig, calib) {
   // aloft (moving-gait thumb): carried lifted, bears no weight (§4.7). Mild curl —
   // a deep tuck meant long, fast transitions every start/stop (the visible jank)
   const ALOFT = { yaw: 0, mcp: -0.15, pip: 0.9, dip: M.clamp(0.9 * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
+  // "no" gesture: index lifts to a near-straight point and wags yaw — a single digit,
+  // its own local anatomical cone, no coupling to body pose or the other four legs.
+  const WAG_BASE = { yaw: 0, mcp: 0, pip: 0.5, dip: M.clamp(0.5 * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
+  function wagPose(t, dur) {
+    const u = t / dur, fade = Math.sin(Math.PI * u);
+    return { ...WAG_BASE, yaw: fade * Math.sin(2 * Math.PI * C.NO_CYCLES * u) * C.NO_WAG_AMP };
+  }
   function poseLeg(f, pose, rate, dt) {
     const d = rig.digits[f], leg = legs[f];
     const a = { ...pose };
@@ -329,9 +362,14 @@ function makeSim(rig, calib) {
 
     // --- SI physics (§4.8) ---
     s.speed = Math.hypot(s.v.x, s.v.z);
+    // gesture engine: block/cancel while airborne or moving (locomotion owns the pose then)
+    if (s.gesture) {
+      if (s.airborne || s.speed > C.V_MOVE) s.gesture = null;
+      else { s.gesture.t += dt; if (s.gesture.t >= s.gesture.dur) s.gesture = null; }
+    }
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
     const rideT = Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
-      rig.palmDepth + C.BELLY_CLEAR);
+      rig.palmDepth + C.BELLY_CLEAR) + gesturePose().height;
     s.rideH += (rideT - s.rideH) * (1 - Math.exp(-dt / C.RIDE_TAU)); // eased — no stop-pop
     const rideH = s.rideH;
     let N = 0;                                               // support, newtons
@@ -391,16 +429,24 @@ function makeSim(rig, calib) {
     // The sepBias solver channel and per-digit yawZSign (measured in calibrate) stay
     // for a swing-landing-only separation approach.
     for (const f of FINGERS) legs[f].sepBias = 0;
+    if (s.gesture && s.gesture.name === 'idk') {               // brief splay: reuses the
+      const fade = Math.sin(Math.PI * s.gesture.t / s.gesture.dur); // §4.9 sepBias channel
+      for (const f of ['index', 'pinky'])
+        legs[f].sepBias = C.IDK_SPLAY * fade * (rig.digits[f].yawZSign ?? 1);
+    }
 
     // --- legs ---
     const de = dutyEff();
     for (const f of FINGERS) {
       const leg = legs[f];
       if (s.airborne) { leg.mode = 'tuck'; tuckLeg(f, dt); continue; }
+      if (f === 'index' && s.gesture && s.gesture.name === 'no') {  // "no": index wags, bears no weight
+        leg.mode = 'gesture'; poseLeg(f, wagPose(s.gesture.t, s.gesture.dur), C.RATE_CARRY, dt); continue;
+      }
       if (gd.aloft.includes(f) && s.speed > C.V_MOVE) {      // aloft only while moving (§4.7)
         leg.mode = 'aloft'; poseLeg(f, ALOFT, C.RATE_CARRY, dt); continue;
       }
-      if (leg.mode === 'aloft' || leg.mode === 'tuck') {     // re-plant via a REAL swing —
+      if (leg.mode === 'aloft' || leg.mode === 'tuck' || leg.mode === 'gesture') { // re-plant via a REAL swing —
         const to = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // teleporting
         to.y = groundY(to.x, to.z) + padHeight(rig.digits[f]); // the foot dragged the tip
         leg.swing = { from: rig.digits[f].tip.getWorldPosition(new THREE.Vector3()),
@@ -441,7 +487,7 @@ function makeSim(rig, calib) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
-    s.airborne = false; s.rideH = calib.standH;
+    s.airborne = false; s.rideH = calib.standH; s.gesture = null;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();
     for (const f of FINGERS) {
@@ -466,7 +512,7 @@ function makeSim(rig, calib) {
     s.airborne = true;
   }
 
-  return { s, legs, step, reset, autoWalk, jump, bandAt };
+  return { s, legs, step, reset, autoWalk, jump, bandAt, gesture };
 }
 
 // --- calibrate() — §4.4 stance-band calibration, THE load-bearing scan. ---
@@ -712,7 +758,8 @@ function devHUD(fps, rig, sim, calib) {
       const l = sim.legs[f];
       return `${f.padEnd(6)} ${l.mode.padEnd(6)} err ${l.err.toFixed(3)}`;
     }),
-    `WASD walk · Space jump · R reset · \` debug`,
+    s.gesture ? `<b>gesture</b> ${s.gesture.name} t ${s.gesture.t.toFixed(2)}/${s.gesture.dur}` : '',
+    `WASD walk · Space jump · R reset · \` debug · 1/2/3 yes/no/idk`,
   ];
   return lines.join('\n');
 }

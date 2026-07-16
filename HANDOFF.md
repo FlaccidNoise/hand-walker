@@ -10,6 +10,13 @@ the end goal: an interactive buddy driven by STT→LLM→TTS that gestures and f
 commands. Locomotion is polished and stays untouched except where gestures layer on top.
 
 ## Completed (locomotion is in good shape — don't re-litigate)
+- **Gesture engine + yes/no/idk** (this session): `s.gesture={name,t,dur}` advanced in
+  step(), `__hand.gesture('yes'|'no'|'idk')` + keys 1/2/3, blocked while airborne or
+  speed > V_MOVE. Yes = body-pitch bob ×2 (YES_PITCH_AMP 0.16). No = index-finger wag
+  (lift to pip 0.5, yaw ±0.28 ×3 via poseLeg, replant via real swing) — the heading-
+  wiggle variant was A/B-refuted (see Key Decisions). IDK = rise +0.08 through the
+  ride-height spring, pitch back 0.08, index+pinky sepBias splay. All verified: tip
+  continuity ≤0.073/frame (swing-normal), snap.mjs visual, unit+calib+qa gates hold.
 - Full gait stack: calibrated stance (standH 0.886 tip-toe), walk/trot/run, jumps,
   turning, thumb walks in the 5-leg ripple (aloft in trot/run).
 - Solver is exact in-band (one-step target-compensation polish in `src/ik.js`).
@@ -18,21 +25,24 @@ commands. Locomotion is polished and stays untouched except where gestures layer
 - Dev tools: probe/snap/trace/median-gate (see Relevant Files) — use them reflexively.
 
 ## Pending (priority order)
-1. **Gesture engine + 3 gestures** (this session's goal — see Suggested Next Steps).
-2. §4.9 separation done right: bias SWING LANDINGS only (v1 yaw-shove on planted feet
+1. §4.9 separation done right: bias SWING LANDINGS only (v1 yaw-shove on planted feet
    is A/B-refuted, disabled; plumbing kept: `opts.sepBias`, `d.yawZSign`).
-3. Pivot-in-place step pattern for turnCycle (yaw cone ±0.3 bounds sustained rotation).
-4. Then Phase A: Web Speech STT → LLM intent → behavior library (docs/REBUILD-SPEC.md §9).
+2. Pivot-in-place step pattern for turnCycle (yaw cone ±0.3 bounds sustained rotation).
+3. Then Phase A: Web Speech STT → LLM intent → behavior library (docs/REBUILD-SPEC.md §9);
+   gestures are the first vocabulary entries.
 
 ## Key Decisions
 - Gestures should be a **timed pose-script layer** over the standing stance: drive body
   pose offsets (pitch/roll/height/heading wiggle) and optional per-digit pose overrides
   while planted legs keep solving normally (`solveStance` adapts automatically — that's
   how the whole sim works). Expose `sim.gesture(name)`; block/queue while airborne.
-- Candidate motions — Yes: body pitch nod (rock forward/back about the wrist, 2 bobs).
-  No: heading wiggle ±0.25 rad ×3 (feet planted — small enough for the yaw cones) OR the
-  classic index-finger wag (lift index via poseLeg, wag its yaw). IDK: rise ~+0.08,
-  pitch back slightly, splay/lift index+pinky briefly, settle. Verify LOOK via snap.mjs.
+- **No-gesture heading wiggle REFUTED** (traced, this session): ±0.25 rad of body
+  heading with feet world-pinned drives stance IK err to ~0.06 — past the 0.05 rescue
+  threshold — firing real re-swings on every digit (3 swings/leg, netSlide 0.27–0.33).
+  It is NOT "small enough for the yaw cones"; it's the same ±0.3 finger-yaw wall that
+  keeps turnCycle red. The index-finger wag replaced it: single digit via poseLeg
+  (mode 'gesture'), WAG_BASE pip 0.5 (a near-straight base pose at RATE_CARRY 7 sweeps
+  too long a lever arc — visible snap), replant through the aloft-exit real-swing path.
 - Feel-over-metric is the standing user priority; median gate is the honesty tool.
 
 ## Relevant Files
@@ -58,11 +68,10 @@ commands. Locomotion is polished and stays untouched except where gestures layer
 - If gestures change calibration outputs, re-baseline deliberately: `calib-gate.mjs --update`.
 
 ## Suggested Next Steps
-1. Read this file + `docs/REBUILD-SPEC.md` §4/§5/§9; skim `main.js` makeSim.
-2. Build the gesture layer in `main.js`: `s.gesture = {name, t}` advanced in `step()`,
-   applying body-pose offsets via `applyBodyPose` inputs + optional `poseLeg` overrides;
-   `__hand.gesture('yes'|'no'|'idk')` + keyboard keys (1/2/3) for manual testing.
-3. Implement Yes first (pure body pitch bob — no digit work), verify with
-   `snap.mjs --run "window.__hand.gesture('yes')"` sequence + a tip-continuity probe
-   (no frame-jumps > ~0.08), then No, then IDK.
-4. Gate: unit + calib-gate + `qa-gate.mjs --repeat 2` must not regress; commit per gesture.
+1. Read this file + `docs/REBUILD-SPEC.md` §4/§5/§9; skim `main.js` makeSim + the
+   gesture engine (gesturePose/gesture/wagPose + the 'gesture' leg mode).
+2. Phase A (REBUILD-SPEC §9): Web Speech STT → LLM intent → behavior library. The
+   action interface already exists: `__hand.gesture/autoWalk/jump`. Start with a
+   command grammar mapping intents onto it.
+3. Gesture polish if it reads flat in person: amplitudes/durations live in
+   `src/tuning.js` (GESTURE_DUR, YES_*, NO_*, IDK_*) — feel-over-metric, snap.mjs first.
