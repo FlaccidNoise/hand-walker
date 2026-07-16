@@ -1,79 +1,83 @@
-# Handoff — Gesture Vocabulary + Idles Shipped; Next: User Feel Pass / Brain
+# Handoff — Phase A Brain Shipped (voice/LLM control); Direct Control Removed
 
 **Date:** 2026-07-16
 **Project:** hand-walker (`/Users/joshtaylor/CodingProjects/hand-walker`)
 
 ## Current Task
-Gesture vocabulary + idle layer are BUILT (this session). Next: user feel pass on the
-10 gestures in the live browser (static-frame look was verified headless; motion feel
-was not user-judged), then §9 Phase A brain (STT → LLM intent → `__hand` calls).
+Thing now runs on voice: hold Space → STT → Gemini planner → JSON action plan →
+executor. WASD/1-0/Space-jump direct control is GONE — the brain is the only driver.
+Next: live user pass on voice quality/latency/persona (headless can exercise the full
+loop via `brain.ask(text)`, but real mic + real ears is a human judgment call).
 
-## Completed (this session)
-- **Pose-track engine** (`src/gestures.js`): gesture = `{ dur, body?{pitch,roll,height},
-  splay?{fingers,track}, digits?{f:{base, yaw/mcp/pip tracks, win:[u0,u1]}} }`;
-  Track = `[[u,v],...]` smoothstep keys; `osc(cycles,amp,env?)` generates oscillation
-  keys. Digit `win` windows let digits join/leave mid-gesture (exit re-plants via the
-  existing aloft-exit real-swing path). main.js samples defs generically — no bespoke
-  per-gesture code. Defs ARE the tuning (constants moved out of tuning.js).
-- **10 gestures** (keys 1-0): yes, no, idk (reworked: 1.1 s, fast-rise/slow-settle,
-  pitch-back −0.15, +0.1 rise, thumb flare), wave (finger ripple via windows), laugh
-  (height+pitch bounce ×4), bow (+pitch dip + crouch hold), point, beckon, thinking,
-  tap (4 verified ground strikes).
-- **Idles** (`IDLES` in gestures.js + scheduler in step()): breathe/shift/drum,
-  weighted-random after IDLE_AFTER 8 s sim without input, re-fire every IDLE_GAP 5 s
-  ±30%; `markInput()` in autoWalk/jump/gesture cancels instantly; real gestures
-  replace a running idle. Gated: idles need stance + f===0 + speed ≤ V_MOVE.
-- Gesture height now bypasses the RIDE_TAU ease (it smeared the shrug flat); the
-  support spring is the physical smoother. `__hand.GESTURES/IDLES` exposed (brain
-  phase can enumerate the vocabulary).
-- Gates at every milestone: unit ok, calib bit-exact, QA 7/9 baseline
-  (turnCycle red-by-choice, gaitShift ~0.55, spam allow-listed).
+## Completed (this session, on top of the gesture/idle work — see git log for those)
+- **`src/brain.js`**: sequential action-plan executor (`{do:'walk'|'turn'|'gesture'|
+  'jump'|'wait', ...}`) driving the sim ONLY through `autoWalk`/`gesture`/`jump` —
+  every locomotion invariant still applies, nothing pokes sim state directly. `turn`
+  walks a small arc (no pivot-in-place gait exists — turnCycle is still red).
+  Per-action timeouts; unknown action/gesture/empty plan → visible `error` status
+  (no silent failures). `__hand.reset()` now stops the brain first.
+- **LLM planner**: `POST /llm` in `scripts/serve.py` proxies to Gemini (key stays
+  server-side, read from `GEMINI_API_KEY` env at server start — restart serve.py from
+  a shell that has sourced it). `brain.ask(text)` sends `[state: pos, heading, user
+  direction]` + the message, gets back `{say, plan}`, speaks `say` via
+  SpeechSynthesis (pitch 1.6 tiny-robot voice) and runs `plan`. History capped at 12
+  turns.
+- **Voice UI** (`index.html` + main.js): hold-Space push-to-talk (Web Speech STT,
+  interim transcript shown live) or type into the `#talkText` box + Enter. Status bar
+  shows listening/thinking/saying/acting/error (error styled red) — built error-state
+  first per house rule.
+- Gates every milestone: unit ok, calib bit-exact, QA 7/9 baseline unchanged (brain
+  drives through the same player API qa.js uses, so nothing regressed).
 
-## Verification Method (NEW — use this)
-- **Paused deterministic stepping**: `h.state.paused=true; h.sim.reset(); loop
-  h.sim.step(0.00625)`. dt MUST be ≤~0.008: the support spring's explicit-Euler
-  damping is UNSTABLE at dt 0.0125 (c·dt/m ≈ 3.2 > 2 — body launches to y≈5 in a
-  plain settle). Live headless runs ~120 fps (sim dt ~6 ms), which is why rAF runs
-  never showed it.
-- **Continuity probe**: step DT 0.00625, sample tips every 4th step (0.025 s sim ≈
-  old trace cadence). Yardsticks ON THIS PROBE: walking swing 0.22, approved 'no'
-  0.138 (RATE_CARRY digit-raise entry — the dominant term for all digit gestures),
-  body-only gestures ≈ 0 (feet pinned). Don't compare against the old "≤0.08" bar —
-  different method.
-- Snap mid-gesture: pause + step to phase, then screenshot (`snap.mjs --run` with a
-  ready-wait loop; snap's --run fires before page ready).
+## Key Decision — model choice (VERIFIED, don't re-litigate)
+- **`gemini-3.5-flash` is UNUSABLE for this**: it's a reasoning model that leaks
+  "thinking out loud" text after a complete, valid JSON object even with
+  `responseMimeType:'application/json'` AND `thinkingConfig.thinkingBudget:0`.
+  Reproduced nondeterministically (~1/3 of calls at temp 0.4) with two DIFFERENT
+  corruption shapes (trailing prose once, trailing stray `}` once) — this is not a
+  one-off fluke, don't retry it hoping thinkingBudget fixes it.
+- **`gemini-2.5-flash` is the pick**: 5/5 clean JSON in manual trials, no thinking
+  leakage. `gemini-2.0-flash-001` (was in earlier notes) is 404 GONE — Google
+  deprecated it; don't hardcode it anywhere.
+- Defense in depth kept anyway: `parseFirstJSON()` in brain.js extracts the first
+  balanced (string-aware) `{...}` instead of `JSON.parse`-ing the whole reply — cheap
+  insurance against the next model swap having the same issue.
 
-## Key Decisions / Gotchas (this session)
-- Track keyframe peaks that must be REACHED need a hold (two keys): tap's
-  instantaneous 0.25-rad peaks got rate-clipped and never hit ground; held 0.4-rad
-  strokes strike (index stance tip y = pad height 0.0896 — "ground" for strike
-  detection, not y≈0).
-- Sign conventions: pitch − = stump-up/rear-back (idk), + = dip/bow; digit mcp − =
-  lift. walkPitch itself is −0.15.
-- IDLE_AFTER (8 s sim) must exceed every QA quiet stretch (rest = 3 s) or idles
-  contaminate the gate — checked, safe, qa.js untouched.
-- Still true: NO body-heading tracks (refuted, re-swing storm); digit bases stay
-  part-curled pip ≥ ~0.5 (rate-cap snap).
+## Verification Method (carried from prior session, still true)
+- Manual `sim.step(dt)` needs dt ≤ ~0.008 (spring damping unstable at 0.0125 — probes
+  now standardize on 0.00625).
+- `node scripts/probe.mjs "<expr>"` can drive `h.brain.ask('...')` directly and poll
+  `h.brain.st.i` — this is how the full voice-free loop (planner + executor) was
+  verified: compound commands, spatial commands (uses `camera.position` via
+  `makeBrain(sim, rig, camera)`), and question→gesture answers all confirmed working
+  end to end against the live Gemini API.
+- Restarting `serve.py` for `/llm` changes: `lsof -ti :8741 | xargs kill`, then relaunch
+  with `source ~/.zshrc` in the same shell (the key is read at process start only).
 
 ## Pending (priority order)
-1. **User feel pass** on all 10 gestures + 3 idles live (keys 1-0; idles fire after
-   8 s hands-off). Iterate amplitudes/durations in `src/gestures.js` defs only.
+1. **Live user pass**: real mic (Chrome permission prompt — first use only), real TTS
+   voice/pacing, latency feel (network + LLM roundtrip currently un-timed against a
+   human's patience). Iterate the `SYSTEM` prompt in brain.js and `say` tone from
+   there — it's the one place persona lives.
 2. §4.9 separation on SWING LANDINGS only (plumbing ready: `opts.sepBias`, `d.yawZSign`).
-3. Pivot-in-place step pattern for turnCycle.
-4. §9 Phase A brain: Web Speech STT → LLM intent → `__hand.gesture/autoWalk/jump`
-   (+ TTS — the hand talks back; see memory buddy-goal-and-tooling).
+3. Pivot-in-place step pattern for turnCycle (would let `turn` be instant instead of
+   an arc-walk, and unblocks a true "turn around" gesture-scale command).
+4. Consider: barge-in (Space while brain is 'acting'/'saying' should interrupt, not
+   queue) — not built; current behavior is last-command-wins only between actions.
 
 ## Relevant Files
 | File | Notes |
 |------|-------|
-| `src/gestures.js` | THE gesture/idle tuning surface: defs + sampler + authoring rules |
-| `main.js` | engine integration: gesturePose/gestureDigitPose/poseLeg, idle scheduler in step() |
-| `src/tuning.js` | IDLE_AFTER/IDLE_GAP; gesture defs deliberately NOT here |
-| `scripts/probe.mjs` | headless eval; use paused-stepping recipe above |
-| `scripts/snap.mjs` / `trace.mjs` / `qa-gate.mjs` / `calib-gate.mjs` | unchanged |
+| `src/brain.js` | executor + planner + SYSTEM prompt (persona lives here) |
+| `scripts/serve.py` | `/llm` proxy — model name, key handling, error JSON shapes |
+| `main.js` | brain wiring: `brain.tick()` in the loop, talk-UI event handlers |
+| `index.html` | `#talk` bar markup/CSS (listening/error states) |
+| `src/gestures.js` | unchanged this milestone — 10 gestures + 3 idles, still the vocabulary |
+| `scripts/probe.mjs` | can call `h.brain.ask(text)` directly for headless brain testing |
 
 ## Context & Warnings
-- Dev server `python3 scripts/serve.py 8741` serves the LIVE tree — stamp measurements
-  with git SHA; never edit sim code while qa-gate runs.
-- Verify HEADLESS only (visible Chrome throttles rAF; hidden tabs freeze the sim).
+- Dev server must be started with `GEMINI_API_KEY` in its environment or `/llm`
+  returns a visible 503 (by design — no silent failures); `source ~/.zshrc` before
+  `python3 scripts/serve.py 8741`.
+- Verify HEADLESS only; visible Chrome throttles rAF, hidden tabs freeze the sim.
 - Commits: `--no-verify`, no Co-Authored-By trailers, one commit per verified milestone.
