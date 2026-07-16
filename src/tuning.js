@@ -90,8 +90,12 @@ export const RATE_PLANTED = 16;
 export const RATE_SWING = 18;
 export const TUCK_MIN = 1.15;          // airborne legs never tuck below 1.15·standH
 
-// §5 standH rule: lowest body height where every digit (incl. thumb) reaches rest ×0.97
-export const REST_SCALE = 0.97;
+// §5 stance rule: feet plant forward of the knuckles as descending diagonals — each
+// rest sits on the ground at REST_EXT of the digit's reach along its lane, at least
+// REST_MIN_FWD·reach forward of the MCP. standH = HIGHEST wrist height where every
+// digit (incl. thumb) plants through the real solver; the pinky pins it.
+export const REST_EXT = 0.92;
+export const REST_MIN_FWD = 0.25;
 
 // --- Calibration (§4.4) ---
 export const CALIB_DT = 0.05;         // fixed dt, no wall clock → bit-exact

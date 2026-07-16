@@ -196,6 +196,13 @@ function makeSim(rig, calib) {
     const rescue = sFrom < band.lo - 0.05;                   // started deep behind the band
     const dur = M.clamp(Math.max((1 - dutyEff()) / Math.max(s.f, 1e-3),
       C.SWING_MIN, rescue ? C.RESCUE_DUR : 0), C.SWING_MIN, 0.2);
+    if (s.f === 0) {                                         // idle settle: go to the
+      const landW = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // VALIDATED rest
+      landW.y = groundY(landW.x, landW.z) + padHeight(d);
+      leg.swing = { from: leg.foot.clone(), to: landW, t: 0, dur, rescue: false };
+      leg.mode = 'swing';
+      return;
+    }
     const stanceTime = dutyEff() / Math.max(s.f, 1e-3);
     const vLoc = _b.copy(s.v).applyAxisAngle(UP, -s.heading);
     const stanceDist = Math.min(Math.abs(vLoc.x) * stanceTime / mult,
@@ -234,6 +241,7 @@ function makeSim(rig, calib) {
       d.tip.getWorldPosition(leg.foot);
       leg.mode = 'stance';
       leg.swing = null;
+      leg.err = 0;    // vs the pinned foot — a stale swing-target err re-triggered settles
     }
   }
 
@@ -315,12 +323,11 @@ function makeSim(rig, calib) {
       applyBodyPose(); reseedFeet();
     }
     applyBodyPose();
-    // palm/knuckle-dome bottoms out at the floor and scrapes (§4.8)
+    // palm/knuckle-dome/wrist-stump bottoms out at the floor and scrapes (§4.8)
     let pen = 0;
-    for (const f of FINGERS) {
-      const d = rig.digits[f];
-      const p = d.mcp.getWorldPosition(_a);
-      pen = Math.max(pen, groundY(p.x, p.z) + padHeight(d) - p.y);
+    for (const j of [rig.wrist, ...FINGERS.map(f => rig.digits[f].mcp)]) {
+      const p = j.getWorldPosition(_a);
+      pen = Math.max(pen, groundY(p.x, p.z) + 0.012 - p.y);
     }
     if (pen > 0) {
       body.position.y += pen;
@@ -416,33 +423,71 @@ function calibrate(rig) {
     rig.root.updateMatrixWorld(true);
   };
 
-  // foot rests: bind tip xz pulled 3% toward the MCP (§5 standH rule), pad height up
-  const feet = {};
-  setPose(0, false);
-  for (const f of FINGERS) {
-    const d = rig.digits[f];
-    const tipW = rig.root.localToWorld(d.pos.tip.clone());
-    const mcpW = rig.root.localToWorld(d.pos.mcp.clone());
-    feet[f] = new THREE.Vector3(
-      mcpW.x + C.REST_SCALE * (tipW.x - mcpW.x), padHeight(d),
-      mcpW.z + C.REST_SCALE * (tipW.z - mcpW.z));
-  }
   const solveTo = (d, target) => {
     solveLeg(d, rig.root.worldToLocal(target.clone()), { root: rig.root });
     groundConstrain(d, rig.root);
     return d.tip.getWorldPosition(tmp).distanceTo(target);   // world-unit tip err
   };
-  const plantDigit = (f) => {
-    const d = rig.digits[f];
-    if (d.mcp.getWorldPosition(tmp).y < padHeight(d)) return Infinity;
-    return solveTo(d, feet[f]);
-  };
 
-  // --- standH: lowest body height where every digit (incl. thumb) plants (§5) ---
+  // lane direction per digit: MCP toward bind tip in the ground plane, then refined to
+  // the nearest angle the REAL solver can hold on the ground at a probe height — the
+  // thumb's oblique CMC plane can't descend along its raw bind lane (yaw pegs at ±0.65
+  // and still misses). Nearest-to-bind keeps it as wide as reachable ("thumb wide").
+  const laneDir = {};
+  setPose(0, false);
+  for (const f of FINGERS) {
+    const d = rig.digits[f];
+    const tipW = rig.root.localToWorld(d.pos.tip.clone());
+    const mcpW = rig.root.localToWorld(d.pos.mcp.clone());
+    laneDir[f] = new THREE.Vector3(tipW.x - mcpW.x, 0, tipW.z - mcpW.z).normalize();
+  }
+  setPose(0.45, false);
+  for (const f of FINGERS) {
+    const d = rig.digits[f];
+    const mcpW = d.mcp.getWorldPosition(tmp).clone();
+    const drop = mcpW.y - padHeight(d);
+    const ext = C.REST_EXT * d.reachW;
+    if (ext <= Math.abs(drop)) continue;
+    const fwd = Math.max(Math.sqrt(ext * ext - drop * drop), C.REST_MIN_FWD * d.reachW);
+    let best = null;
+    for (let a = -1.0; a <= 1.0 + 1e-9; a += 0.05) {
+      const dir = laneDir[f].clone().applyAxisAngle(UP, a);
+      const foot = new THREE.Vector3(mcpW.x + dir.x * fwd, padHeight(d), mcpW.z + dir.z * fwd);
+      d.yaw = 0;
+      if (solveTo(d, foot) < C.BAND_TIP_ERR && (best === null || Math.abs(a) < Math.abs(best)))
+        best = a;
+    }
+    if (best !== null) laneDir[f].applyAxisAngle(UP, best);
+  }
+  // stance rests at height h (§5): descending diagonals — on the ground at REST_EXT of
+  // reach from the live MCP, ≥REST_MIN_FWD·reach forward of it. Null if a digit's MCP
+  // rides too high to descend that steeply (pins the stance from above — the pinky).
+  const restsAt = (h) => {
+    setPose(h, false);
+    const out = {};
+    for (const f of FINGERS) {
+      const d = rig.digits[f];
+      const mcpW = d.mcp.getWorldPosition(tmp);
+      const drop = mcpW.y - padHeight(d);
+      const ext = C.REST_EXT * d.reachW;
+      if (ext * ext <= drop * drop) return null;             // can't descend that steeply
+      const fwd = Math.max(Math.sqrt(ext * ext - drop * drop), C.REST_MIN_FWD * d.reachW);
+      out[f] = new THREE.Vector3(mcpW.x + laneDir[f].x * fwd, padHeight(d),
+        mcpW.z + laneDir[f].z * fwd);
+    }
+    return out;
+  };
+  let feet = null;
+  const plantDigit = (f) => solveTo(rig.digits[f], feet[f]);
+
+  // --- standH: HIGHEST wrist height where every digit (incl. thumb) plants (§5:
+  // wrist high; the pinky pins it) ---
   let standH = 0;
   const perDigitH = {};
-  for (let h = 0.20; h <= 0.85; h += 0.002) {
-    setPose(h, false);
+  for (let h = 1.20; h >= 0.20; h -= 0.002) {
+    const fts = restsAt(h);
+    if (!fts) continue;
+    feet = fts;
     let allOk = true;
     for (const f of FINGERS) {
       if (plantDigit(f) > C.BAND_TIP_ERR) { allOk = false; break; }
@@ -450,6 +495,7 @@ function calibrate(rig) {
     }
     if (allOk) { standH = h; break; }
   }
+  feet = restsAt(standH) ?? feet;
 
   // --- stance bands: scan each leg's foot along its lane (MCP-relative forward
   // offset s, constant lateral z) at the walking pose; keep the contiguous window
@@ -484,7 +530,7 @@ function calibrate(rig) {
   // forward of bind (§4.6). Read-only scan with the real solver (§8): keep the
   // smallest pitch that maximizes the weakest digit's band at the walk pose. ---
   let bestPitch = 0, bestScore = -1;
-  for (let p = 0; p <= 0.4 + 1e-9; p += 0.05) {
+  for (let p = -0.3; p <= 0.4 + 1e-9; p += 0.05) {
     C.TUNE.walkPitch = p;
     let score = Infinity;
     for (const f of FINGERS) {

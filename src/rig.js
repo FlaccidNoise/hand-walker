@@ -1,6 +1,7 @@
 // src/rig.js — GLB load + auto-rig → legs / reach / SI constants. Instance-ready. (HANDOFF §3, §4.1)
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { solveLeg } from './ik.js';
 import * as C from './tuning.js';
 
 export const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
@@ -114,8 +115,91 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
   mount.name = 'ThingMount';
   root.scale.setScalar(scale);
   root.rotation.set(0, 0, handedness < 0 ? Math.PI / 2 : -Math.PI / 2);
-  root.updateMatrixWorld(true);
   mount.add(root);
+  root.updateMatrixWorld(true);
+  // recenter: the WRIST is the body origin ("wrist high" is literal — body height =
+  // wrist height). The GLB's wrist is not at the scene origin; without this the sim
+  // steers an invisible point ~0.5u from the hand and the stump drags underground.
+  root.position.sub(wrist.getWorldPosition(new THREE.Vector3()));
+  root.updateMatrixWorld(true);
+
+  // --- thumb CMC stance pronation (§4.1 "thumb wide"): the saddle joint pronates the
+  // thumb column when opposing; without it the ±0.65 yaw cone cannot contain ANY wide
+  // ground target at stance heights (measured: err ≥ 0.09 at every lane angle). Scan a
+  // pre-rotation about the metacarpal bone axis with the REAL solver at a probe stance
+  // and bake the best passing angle into the thumb's bind pose. ---
+  {
+    const d = digits.thumb;
+    const posL = (o) => root.worldToLocal(o.getWorldPosition(new THREE.Vector3()));
+    const dirL = (o, i) => {
+      const w = new THREE.Vector3().setFromMatrixColumn(o.matrixWorld, i).normalize();
+      const p = o.getWorldPosition(new THREE.Vector3());
+      return root.worldToLocal(p.clone().add(w)).sub(root.worldToLocal(p.clone())).normalize();
+    };
+    const recapture = () => {
+      d.pos = { meta: null, mcp: posL(d.mcp), pip: posL(d.pip), dip: posL(d.dip), tip: posL(d.tip) };
+      d.axisW = dirL(d.mcp, 0); d.abdW = dirL(d.mcp, 1);
+      const b0 = d.pos.pip.clone().sub(d.pos.mcp), b1 = d.pos.dip.clone().sub(d.pos.pip),
+        b2 = d.pos.tip.clone().sub(d.pos.dip);
+      d.out0 = b0.dot(d.axisW); d.out1 = b1.dot(d.axisW); d.out2 = b2.dot(d.axisW);
+      d.L0 = b0.length(); d.L1 = b1.length(); d.L2 = b2.length();
+      d.reach = d.pos.mcp.distanceTo(d.pos.tip); d.reachW = d.reach * scale;
+      d.innerW = Math.abs(d.L0 - (d.L1 + d.L2)) * scale;
+      for (const j of [d.mcp, d.pip, d.dip]) d.bindQ[j.name] = j.quaternion.clone();
+      d._bp = null; d.yaw = 0;
+    };
+    const q0 = {};
+    for (const j of [d.mcp, d.pip, d.dip, d.tip]) q0[j.name] = j.quaternion.clone();
+    const boneZ = new THREE.Vector3(0, 0, 1);                // bone runs along local -Z
+    const colW = (o, i) => new THREE.Vector3().setFromMatrixColumn(o.matrixWorld, i).normalize();
+    // the thumb's joint hinge axes are NOT parallel (meta vs proximal ~40°), which
+    // breaks the shared-axis planar model (0.3+ tip err with no limit binding). Twist
+    // the proximal+distal about their own bone axes so every hinge ∥ the meta's — a
+    // bone-axis twist barely changes the thumb's silhouette.
+    const alignAxes = () => {
+      for (const j of [d.pip, d.dip]) {
+        const ax = colW(d.mcp, 0);
+        const t = Math.atan2(ax.dot(colW(j, 1)), ax.dot(colW(j, 0)));
+        j.rotateOnAxis(boneZ, t);
+        mount.updateMatrixWorld(true);
+      }
+    };
+    mount.position.set(0, 0.45, 0);
+    mount.updateMatrixWorld(true);
+    const mcpW0 = d.mcp.getWorldPosition(new THREE.Vector3());
+    const tipW0 = d.tip.getWorldPosition(new THREE.Vector3());
+    const lane = new THREE.Vector3(tipW0.x - mcpW0.x, 0, tipW0.z - mcpW0.z).normalize();
+    let bestPhi = 0, bestErr = Infinity;
+    const tmp = new THREE.Vector3();
+    for (let phi = -1.2; phi <= 1.2 + 1e-9; phi += 0.05) {
+      for (const j of [d.mcp, d.pip, d.dip, d.tip]) j.quaternion.copy(q0[j.name]);
+      d.mcp.rotateOnAxis(boneZ, phi);
+      mount.updateMatrixWorld(true);
+      alignAxes();
+      recapture();
+      const mcpW = d.mcp.getWorldPosition(tmp).clone();
+      const drop = mcpW.y - 0.012, ext = C.REST_EXT * d.reachW;
+      if (ext <= Math.abs(drop)) continue;
+      const fwd = Math.max(Math.sqrt(ext * ext - drop * drop), C.REST_MIN_FWD * d.reachW);
+      const foot = new THREE.Vector3(mcpW.x + lane.x * fwd, 0.012, mcpW.z + lane.z * fwd);
+      solveLeg(d, root.worldToLocal(foot.clone()), { root });
+      const err = d.tip.getWorldPosition(tmp).distanceTo(foot);
+      // prefer passing angles nearest 0; otherwise track the best miss
+      const better = (err < C.BAND_TIP_ERR && bestErr >= C.BAND_TIP_ERR)
+        || (err < C.BAND_TIP_ERR) === (bestErr < C.BAND_TIP_ERR)
+        && (err < C.BAND_TIP_ERR ? Math.abs(phi) < Math.abs(bestPhi) : err < bestErr);
+      if (better) { bestPhi = phi; bestErr = err; }
+    }
+    for (const j of [d.mcp, d.pip, d.dip, d.tip]) j.quaternion.copy(q0[j.name]);
+    d.mcp.rotateOnAxis(boneZ, bestPhi);
+    mount.updateMatrixWorld(true);
+    alignAxes();
+    recapture();                                             // aligned frames ARE bind now
+    d.pronation = bestPhi;
+    d.pronationErr = bestErr;
+    mount.position.set(0, 0, 0);
+    mount.updateMatrixWorld(true);
+  }
 
   // footRest positions (world, post-mount) — bind fingertip placement
   for (const f of FINGERS) {
