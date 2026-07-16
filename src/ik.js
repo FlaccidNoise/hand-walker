@@ -81,7 +81,7 @@ export function solveLeg(d, target, opts = {}) {
     const y1 = M.wrapAngle(al - ac), y2 = M.wrapAngle(al + ac);
     yaw = Math.abs(M.wrapAngle(y1 - prev)) <= Math.abs(M.wrapAngle(y2 - prev)) ? y1 : y2;
     const fade = M.clamp01((t.length() / d.reach - C.YAW_FADE_LO) / (C.YAW_FADE_HI - C.YAW_FADE_LO));
-    yaw = M.clamp(yaw * fade, -d.yawMax, d.yawMax);
+    yaw = M.clamp(yaw * fade + (opts.sepBias || 0), -d.yawMax, d.yawMax); // §4.9 bias
   }
   d.yaw = yaw;
   // rotate the working basis by yaw (Rodrigues about abdW)

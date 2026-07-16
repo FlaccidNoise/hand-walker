@@ -110,6 +110,8 @@ function makeSim(rig, calib) {
   const body = rig.mount;
   const legs = {};
   const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
+  const SEP_PAIRS = [['thumb', 'index'], ['index', 'middle'], ['middle', 'ring'], ['ring', 'pinky']];
+  const sepPrev = {};
 
   const s = {
     v: new THREE.Vector3(), cmd: new THREE.Vector3(),
@@ -168,7 +170,8 @@ function makeSim(rig, calib) {
   // planted tip); swings pass null and re-select freely (§4.2).
   function solveLegWorld(f, targetW, rateCap, dt, fold = 0, branch = null) {
     const d = rig.digits[f], leg = legs[f];
-    const res = solveLeg(d, rig.root.worldToLocal(_a.copy(targetW)), { root: rig.root, branch });
+    const res = solveLeg(d, rig.root.worldToLocal(_a.copy(targetW)),
+      { root: rig.root, branch, sepBias: leg.sepBias || 0 });
     leg.branch = res.branch;
     const a = { ...res.angles };
     if (fold > 0) {
@@ -182,10 +185,10 @@ function makeSim(rig, calib) {
     }
     applyCurl(d, a);
     rig.root.updateMatrixWorld(true);
-    // tuck skips the constraint (§4.3) — but only while the body is high enough that
-    // rate-limited tucks can't lag into the floor (dips happen on ASCENT too, while
-    // legs transition stance→tuck); below 1.3·standH the floor wins again
-    if (!s.airborne || body.position.y <= calib.standH * 1.3) groundConstrain(d, rig.root);
+    // §4.3 says "tuck skips the constraint", but the constraint no-ops unless a
+    // contact is actually below the floor — the skip was redundant AND let
+    // rate-limited tucks lag through the ground during jumps. Always constrain.
+    groundConstrain(d, rig.root);
     leg.angles = a;
     leg.err = d.tip.getWorldPosition(_a).distanceTo(targetW);
     return leg.err;
@@ -363,6 +366,14 @@ function makeSim(rig, calib) {
       s.f = Math.min(f, gd.fMax);
       s.phase += s.f * dt;                                   // UNWRAPPED: floor() is the cycle id
     } else s.f = 0;
+
+    // §4.9 separation controller: DISABLED after A/B refutation. Two gate variants
+    // (splay < SEP_ANG, and scissor-only splay < 0.05, both closing-gated) each made
+    // things WORSE: yaw-shoving planted feet costs more slide than the crossing it
+    // prevents (steadyW 0.49→4.5 / 0.84; turnCycle 2.3→9.0 / 4.5; cross barely moved).
+    // The sepBias solver channel and per-digit yawZSign (measured in calibrate) stay
+    // for a swing-landing-only separation approach.
+    for (const f of FINGERS) legs[f].sepBias = 0;
 
     // --- legs ---
     const de = dutyEff();
@@ -640,6 +651,23 @@ function calibrate(rig) {
     const row = { h };
     for (const f of FINGERS) row[f] = scanBand(f, h, C.BAND_S_STEP, laneZ[f]);
     bandTable.push(row);
+  }
+
+  // per-digit sign of yaw-bias → lateral tip motion (measured, not assumed — it
+  // depends on abdW orientation and curl sign). The §4.9 separation controller
+  // multiplies its push by this to move a tip toward +z or -z on demand.
+  setPose(walkH, true);
+  for (const f of FINGERS) {
+    const d = rig.digits[f];
+    if (!workC[f]) { d.yawZSign = 1; continue; }
+    const mcpW = d.mcp.getWorldPosition(tmp).clone();
+    const target = new THREE.Vector3(mcpW.x + workC[f], padHeight(d), laneZ[f]);
+    d.yaw = 0;
+    solveLeg(d, rig.root.worldToLocal(target.clone()), { root: rig.root });
+    const z0 = d.tip.getWorldPosition(tmp).z;
+    d.yaw = 0;
+    solveLeg(d, rig.root.worldToLocal(target.clone()), { root: rig.root, sepBias: 0.15 });
+    d.yawZSign = Math.sign(d.tip.getWorldPosition(tmp).z - z0) || 1;
   }
 
   // settle: park at standH with every digit planted at its rest
