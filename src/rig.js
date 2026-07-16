@@ -57,9 +57,12 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
     const names = chainNames(f);
     const joints = names.map(n => byName[n]).filter(Boolean);
     const p = jointPrefix(f);
-    const meta = byName[`${p}-metacarpal`];
-    const mcp = byName[`${p}-phalanx-proximal`];   // knuckle (MCP)
-    const pip = f !== 'thumb' ? byName[`${p}-phalanx-intermediate`] : null;
+    const isTh = f === 'thumb';
+    // thumb roots at the CMC (metacarpal joint) — that's where its reach and ±0.65
+    // ab/adduction live; its chain is then a standard 3-bone like a finger.
+    const meta = isTh ? null : byName[`${p}-metacarpal`];
+    const mcp = isTh ? byName['thumb-metacarpal'] : byName[`${p}-phalanx-proximal`];
+    const pip = isTh ? byName['thumb-phalanx-proximal'] : byName[`${p}-phalanx-intermediate`];
     const dip = byName[`${p}-phalanx-distal`];
     const tip = byName[`${p}-tip`];
     const mcpPos = mcp.getWorldPosition(tmp.clone());
@@ -75,6 +78,8 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
     const bindQ = {};
     for (const j of [meta, mcp, pip, dip, tip].filter(Boolean)) bindQ[j.name] = j.quaternion.clone();
     const axisW = new THREE.Vector3().setFromMatrixColumn(mcp.matrixWorld, 0).normalize();
+    // abduction axis: MCP local Y (bone runs along local -Z, flexion along local X)
+    const abdW = new THREE.Vector3().setFromMatrixColumn(mcp.matrixWorld, 1).normalize();
     // bone vectors (root-local) and out-of-plane components along axisW
     const mcpP = pos(mcp), pipP = pos(pip||dip), dipP = pos(dip), tipP = pos(tip);
     const b0 = pipP.clone().sub(mcpP), b1 = (pip?dipP.clone().sub(pipP):new THREE.Vector3()), b2 = tipP.clone().sub(dipP);
@@ -82,10 +87,12 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
     const L0 = b0.length(), L1 = b1.length(), L2 = b2.length();
 
     digits[f] = {
-      name: f, joints, meta, mcp, pip, dip, tip, reach, segLen, axisW,
-      bindQ, pos: { meta: pos(meta), mcp: mcpP, pip: pipP, dip: dipP, tip: tipP },
+      name: f, joints, meta, mcp, pip, dip, tip, reach, segLen, axisW, abdW,
+      bindQ, pos: { meta: meta && pos(meta), mcp: mcpP, pip: pipP, dip: dipP, tip: tipP },
       L0, L1, L2, out0, out1, out2,
-      isThumb: f === 'thumb',
+      isThumb: isTh,
+      slave: isTh ? C.THUMB_SLAVE : C.DIP_SLAVE,
+      yawMax: isTh ? C.YAW_MAX_THUMB : C.YAW_MAX_FINGER,
     };
   }
 

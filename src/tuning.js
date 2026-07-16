@@ -28,6 +28,13 @@ export const LIMITS = [
 
 // --- Reach / step geometry ---
 export const DIP_SLAVE = 0.62;        // DIP anatomically slaved to PIP (~0.62·) (§4.2)
+export const THUMB_SLAVE = 0.5;       // thumb IP slaved to its MCP flexion (CMC-rooted chain)
+// MCP ab/adduction yaw (§4.2): anatomical range (§7: fingers ±0.3, thumb ±0.65),
+// faded out near the knuckle where the lever shrinks (|t|/reach between LO and HI).
+export const YAW_MAX_FINGER = 0.3;
+export const YAW_MAX_THUMB = 0.65;
+export const YAW_FADE_LO = 0.15;
+export const YAW_FADE_HI = 0.40;
 export const ARC_CLEAR = 0.05;         // load-bearing step-height margin, binds on ~80% of swing frames (anatomy, §5)
 
 // --- Separation controller (§4.9) ---
@@ -59,6 +66,9 @@ export const TROT_PAIRS = [['index','ring'], ['middle','pinky']]; // thumb carri
 export const RATE_PLANTED = 16;
 export const RATE_SWING = 18;
 export const TUCK_MIN = 1.15;          // airborne legs never tuck below 1.15·standH
+
+// §5 standH rule: lowest body height where every digit (incl. thumb) reaches rest ×0.97
+export const REST_SCALE = 0.97;
 
 // --- Calibration (§4.4) ---
 export const CALIB_DT = 0.05;         // fixed dt, no wall clock → bit-exact

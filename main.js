@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { buildScene } from './src/scene.js';
 import { buildRig, FINGERS } from './src/rig.js';
-import { solveLeg, resetToBind, tipLocal } from './src/ik.js';
+import { solveLeg, resetToBind, tipLocal, groundConstrain, padHeight } from './src/ik.js';
 import { DebugDraw } from './src/debug.js';
 import * as C from './src/tuning.js';
 
@@ -56,36 +56,62 @@ async function init() {
 
   const clock = new THREE.Clock();
   let frames = 0, fpsT = 0;
-  // --- IK reach-test: middle finger tracks a target circling in its curl plane ---
-  const mid = rig.digits.middle;
-  const pb = planeBasis(mid);
-  let testErr = 0, testTarget = new THREE.Vector3();
-  function planeBasis(d) {
-    const e1 = d.pos.pip.clone().sub(d.pos.mcp).addScaledVector(d.axisW, -d.out0);
-    if (e1.lengthSq() < 1e-9) e1.set(0, -1, 0); e1.normalize();
-    return { e1, e2: new THREE.Vector3().crossVectors(d.axisW, e1).normalize() };
+
+  // --- standH: lowest body height where every digit (incl. thumb) reaches its rest
+  //     ×0.97 through the REAL solve stack (solveLeg + ground constraint) with tip
+  //     err < BAND_TIP_ERR. The pinky pins it (§5). ---
+  // solveLeg works in ROOT-local (bind meters); targets go through root.worldToLocal.
+  // Post-constraint tip error is measured in WORLD units (the constraint yanks the tip
+  // off-target whenever a knuckle would be underground, so those heights self-reject).
+  const body = rig.mount;
+  const feet = {};
+  const tmp = new THREE.Vector3();
+  body.position.set(0, 0, 0); rig.root.updateMatrixWorld(true);
+  for (const f of FINGERS) {
+    const d = rig.digits[f];
+    const tipW = rig.root.localToWorld(d.pos.tip.clone());   // bind rest, world at body y=0
+    const mcpW = rig.root.localToWorld(d.pos.mcp.clone());
+    feet[f] = new THREE.Vector3(
+      mcpW.x + C.REST_SCALE * (tipW.x - mcpW.x), padHeight(d),
+      mcpW.z + C.REST_SCALE * (tipW.z - mcpW.z));
   }
+  const plantDigit = (f) => {
+    const d = rig.digits[f];
+    // the MCP knuckle dome is BODY geometry — IK can't lift it, so a buried dome
+    // invalidates the height outright (returns err = Infinity)
+    if (d.mcp.getWorldPosition(tmp).y < padHeight(d)) return Infinity;
+    solveLeg(d, rig.root.worldToLocal(feet[f].clone()), { root: rig.root });
+    groundConstrain(d, rig.root);
+    return d.tip.getWorldPosition(tmp).distanceTo(feet[f]); // world-unit tip err
+  };
+  let standH = 0;
+  const perDigitH = {};
+  for (let h = 0.20; h <= 0.85; h += 0.002) {
+    body.position.y = h; rig.root.updateMatrixWorld(true);
+    let allOk = true;
+    for (const f of FINGERS) {
+      if (plantDigit(f) > C.BAND_TIP_ERR) { allOk = false; break; }
+      if (perDigitH[f] == null) perDigitH[f] = h;            // first (lowest) h each digit reaches
+    }
+    if (allOk) { standH = h; break; }                       // lowest h where ALL reach
+  }
+  // settle at standH, plant every digit to its foot
+  body.position.y = standH; rig.root.updateMatrixWorld(true);
+  const plantErr = {};
+  for (const f of FINGERS) plantErr[f] = plantDigit(f);
+  window.__stand = { standH, perDigitH, plantErr, feet };
+  controls.target.set(0, standH, 0); camera.position.set(1.4, 0.9 + standH, 2.0); controls.update();
+
   function loop() {
     requestAnimationFrame(loop);
     const dt = Math.min(clock.getDelta(), 1 / 30);
-    const T = clock.elapsedTime;
-    if (!state.paused) {
-      // animate target in the curl plane: radius 0.7·reach, full revolution
-      const r = 0.7 * mid.reach;
-      const ang = T * 1.2;
-      testTarget.copy(mid.pos.mcp).addScaledVector(pb.e1, r * Math.cos(ang)).addScaledVector(pb.e2, r * Math.sin(ang));
-      const res = solveLeg(mid, testTarget, { root: rig.root });
-      testErr = res.err;
-      rig.root.updateMatrixWorld(true);
-      window.__ikTest = { err: testErr, target: testTarget.toArray(), achieved: res.achieved.toArray() };
-    }
     controls.update();
     renderer.render(scene, camera);
-    if (state.debug) drawDebug(dbg, rig, testTarget);
+    if (state.debug) drawDebug(dbg, rig);
     frames++; fpsT += dt;
     if (fpsT > 0.5) {
       const fps = frames / fpsT;
-      hud.innerHTML = devHUD(fps, dt, rig, testErr, testTarget);
+      hud.innerHTML = devHUD(fps, dt, rig);
       frames = 0; fpsT = 0;
     }
   }
@@ -93,19 +119,20 @@ async function init() {
   state.ready = true;
 }
 
-function devHUD(fps, dt, rig, testErr, testTarget) {
+function devHUD(fps, dt, rig) {
   if (!rig) return '';
   const d = rig.digits;
+  const st = window.__stand || {};
   const lines = [
     `<b>Hand Walker</b>  fps ${fps.toFixed(0)}  ${state.paused?'<b>PAUSED</b>':''}`,
     `WORLD_M ${(rig.WORLD_M * 100).toFixed(2)}cm/u  G ${rig.G.toFixed(1)} u/s²  scale ${rig.scale.toFixed(2)}`,
-    `IK test: middle tip err ${testErr?.toFixed(4)}u  target(${testTarget?.toArray().map(v=>v.toFixed(2)).join(',')})`,
-    ...FINGERS.map(f => `${f.padEnd(6)} reach ${d[f].reach.toFixed(3)}m  seg [${d[f].segLen.map(s=>s.toFixed(3)).join(',')}]  axisW(${d[f].axisW.toArray().map(v=>v.toFixed(2)).join(',')})`),
+    `<b>standH ${((st.standH||0)*1).toFixed(4)}u</b>  (${((st.standH||0)*rig.WORLD_M*100).toFixed(2)}cm)  pinky pins it (§5)`,
+    ...FINGERS.map(f => `${f.padEnd(6)} reach ${d[f].reach.toFixed(3)}m  reachH ${(st.perDigitH?.[f]||0).toFixed(3)}  plantErr ${(st.plantErr?.[f]||0).toFixed(4)}`),
   ];
   return lines.join('\n');
 }
 
-function drawDebug(dbg, rig, testTarget) {
+function drawDebug(dbg, rig) {
   dbg.clear();
   const p = new THREE.Vector3();
   const p2 = new THREE.Vector3();
@@ -118,11 +145,6 @@ function drawDebug(dbg, rig, testTarget) {
     }
     d.mcp.getWorldPosition(p); dbg.point(p, 0xff60a0);
     d.tip.getWorldPosition(p); dbg.point(p, 0xffd060);
-    d.mcp.getWorldPosition(p); dbg.arrow(p, d.axisW, 0.04, 0x60ff90);
-  }
-  if (testTarget) {
-    const w = rig.root.localToWorld(testTarget.clone());
-    dbg.point(w, 0xff3030);
   }
 }
 
