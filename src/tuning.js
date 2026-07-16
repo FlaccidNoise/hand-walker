@@ -77,8 +77,10 @@ export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lowe
 
 // --- Steering / cadence ---
 export const STEER_GAIN = 6;          // yaw-rate gain toward the commanded heading (1/s)
-export const YAW_RATE_MAX = 1.2;      // rad/s — faster whips planted feet out of every band
-export const CAD_YAW_GAIN = 0.8;      // cadence rise per |yaw rate| — turning consumes band (§4.5)
+export const YAW_RATE_MAX = 0.35;     // rad/s — feet sweep yawRate·radius·stanceTime of arc
+                                      // per stance; beyond ~0.1 rad/stance no band absorbs it
+                                      // (a hand pivots deliberately, in small re-steps)
+export const CAD_YAW_GAIN = 1.5;      // cadence rise per |yaw rate| — turning buys re-steps (§4.5)
 export const ACCEL_TAU = 0.12;        // s — velocity-command response time (friction-limited)
 
 // --- Swing shaping (§4.6) ---

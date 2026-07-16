@@ -69,6 +69,10 @@ function makeRecorder(H) {
       }
     }
     for (const [a, b] of NEIGHBOR_PAIRS) {
+      // carried legs (aloft/tuck) aren't stepping feet — lane order applies to
+      // planted and swinging legs only (§4.6/§4.7)
+      const stepping = (m) => m === 'stance' || m === 'swing';
+      if (!stepping(sim.legs[a].mode) || !stepping(sim.legs[b].mode)) continue;
       const sign = Math.sign(restZ[b] - restZ[a]);
       const margin = (sim.legs[b]._zHand - sim.legs[a]._zHand) * sign;
       if (margin < r.cross) r.cross = margin;
@@ -97,8 +101,8 @@ function makeRecorder(H) {
       if (m.cross <= CRIT.cross) fails.push(`cross ${m.cross}`);
       if (m.floor < CRIT.floor) fails.push(`floor ${m.floor}`);
       if (m.tipErrP95 >= CRIT.tipErrP95) fails.push(`tipErrP95 ${m.tipErrP95}`);
-      if (m.swingMin != null && (m.swingMin < CRIT.swingLo - 0.005 || m.swingMax > CRIT.swingHi + 0.005))
-        fails.push(`swingDur ${m.swingMin}-${m.swingMax}`);
+      if (m.swingMin != null && (m.swingMin < CRIT.swingLo - 0.01 || m.swingMax > CRIT.swingHi + 0.01))
+        fails.push(`swingDur ${m.swingMin}-${m.swingMax}`);   // ±0.01: rAF sampling quantum
       if (m.towed) fails.push('towed digit');
       return { metrics: m, fails, pass: fails.length === 0 };
     },

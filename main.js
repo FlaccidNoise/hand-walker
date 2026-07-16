@@ -215,17 +215,20 @@ function makeSim(rig, calib) {
     const vLoc = _b.copy(s.v).applyAxisAngle(UP, -s.heading);
     const stanceDist = Math.min(Math.abs(vLoc.x) * stanceTime / mult,
       band.hi - band.lo - 2 * C.BAND_MARGIN);
-    // half a stride ahead PLUS the body's advance during the swing itself — the land
-    // target is fixed world, but the band is MCP-relative at LANDING time (§4.6)
-    const sLand = M.clamp((band.lo + band.hi) / 2 + 0.5 * stanceDist + vLoc.x * dur,
-      band.lo + C.BAND_MARGIN, band.hi - C.BAND_MARGIN + Math.max(vLoc.x, 0) * dur);
-    const zLand = M.clamp(calib.feet[f].z + vLoc.z * (0.5 * stanceTime + dur),
+    // plan in the PREDICTED hand frame at landing time — the body translates v·dur and
+    // rotates yawRate·dur during the swing; planning in the current frame lands feet
+    // systematically stale (drained bands when walking, swept lanes when turning §4.6)
+    const sLand = M.clamp((band.lo + band.hi) / 2 + 0.5 * stanceDist,
+      band.lo + C.BAND_MARGIN, band.hi - C.BAND_MARGIN);
+    const zLand = M.clamp(calib.feet[f].z + vLoc.z * 0.5 * stanceTime,
       calib.feet[f].z - d.reachW * C.LANE_CLAMP, calib.feet[f].z + d.reachW * C.LANE_CLAMP);
     // NOTE: no 0.72·reach cap here — the ORIGINAL's proxy for live-height reachability
     // contradicts this stance (rests at 0.92·reach) and pulled land targets airborne.
     // The band clamp above IS the live-height capability (scanned at ground height
     // through the real solve stack).
-    const landW = handToWorld(_b.set(mcpHX + sLand, 0, zLand), new THREE.Vector3());
+    const landW = new THREE.Vector3(mcpHX + sLand, 0, zLand)
+      .applyAxisAngle(UP, s.heading + s.yawRate * dur)
+      .add(_c.set(body.position.x + s.v.x * dur, 0, body.position.z + s.v.z * dur));
     landW.y = groundY(landW.x, landW.z) + padHeight(d);
     leg.swing = { from: leg.foot.clone(), to: landW, t: 0, dur, rescue };
     leg.mode = 'swing';
@@ -379,13 +382,17 @@ function makeSim(rig, calib) {
         leg.cycleId = id;
         startSwing(f);
       } else if (leg.mode === 'stance' && s.f > 0 && leg.cycleId !== id) {
-        // band-exit rescue (§4.6): a foot dragged past the band bottom (or unreachable
-        // while turning) can't wait for its phase slot — it's being towed
+        // band-exit rescue (§4.6): a foot dragged past the band bottom, swept out of
+        // its lane by rotation, or unreachable can't wait for its phase slot
         const d2 = rig.digits[f];
         const mcpHX = worldToHand(d2.mcp.getWorldPosition(_a), _b).x;
-        const sFoot = worldToHand(leg.foot, _b).x - mcpHX;
+        const fh = worldToHand(leg.foot, _b);
+        const sFoot = fh.x - mcpHX;
+        const zOff = Math.abs(fh.z - calib.feet[f].z);
         const band = bandAt(f, body.position.y);
-        if ((band && sFoot < band.lo - 0.02) || leg.err > 4 * C.BAND_TIP_ERR) {
+        if ((band && sFoot < band.lo - 0.02)
+          || zOff > 2 * d2.reachW * C.LANE_CLAMP
+          || leg.err > 4 * C.BAND_TIP_ERR) {
           leg.cycleId = id;
           startSwing(f);
         }
