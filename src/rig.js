@@ -20,25 +20,6 @@ function loadGLTF(url) {
   return new Promise((res, rej) => new GLTFLoader().load(url, res, undefined, rej));
 }
 
-// axisW: world curl axis shared by all joints of a digit (flexion axis from bind pose).
-// Derived as the mean world-X of the digit's joints (standard WebXR rig flexion = local X),
-// validated for parallelism; falls back to cross of consecutive bone dirs.
-// NOTE: validated/possibly overridden per-digit by a curl-test when the IK is built (§4.2).
-function deriveAxisW(joints) {
-  const axes = joints.map(j => new THREE.Vector3().setFromMatrixColumn(j.matrixWorld, 0).normalize());
-  const mean = axes.reduce((a, b) => a.add(b), new THREE.Vector3()).normalize();
-  const ok = axes.every(a => Math.abs(a.dot(mean)) > 0.985);
-  if (ok) return mean;
-  // fallback: cross of first two bone directions
-  const p = joints.map(j => new THREE.Vector3().setFromMatrixPosition(j.matrixWorld));
-  for (let i = 0; i < p.length - 2; i++) {
-    const d0 = p[i + 1].clone().sub(p[i]), d1 = p[i + 2].clone().sub(p[i + 1]);
-    const n = new THREE.Vector3().crossVectors(d0, d1);
-    if (n.lengthSq() > 1e-8) return n.normalize();
-  }
-  return mean;
-}
-
 export async function buildRig(url, handedness = C.HANDEDNESS) {
   const gltf = await loadGLTF(url);
   const root = gltf.scene;
@@ -66,26 +47,44 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
   }
   root.updateMatrixWorld(true);
 
-  // --- per-digit geometry (world bind, pre-scale) ---
+  // --- per-digit geometry (root-local = world here, root still identity pre-mount) ---
+  // axisW = the MCP joint's world-X (curl-test confirmed local X is the flexion axis,
+  // ~-Z lateral for the four fingers; thumb differs as it's opposed). All joints of a
+  // digit share it (verified); the MCP is the authoritative hinge.
   const tmp = new THREE.Vector3();
   const digits = {};
   for (const f of FINGERS) {
     const names = chainNames(f);
     const joints = names.map(n => byName[n]).filter(Boolean);
     const p = jointPrefix(f);
-    const mcp = byName[`${p}-phalanx-proximal`]; // knuckle
+    const meta = byName[`${p}-metacarpal`];
+    const mcp = byName[`${p}-phalanx-proximal`];   // knuckle (MCP)
+    const pip = f !== 'thumb' ? byName[`${p}-phalanx-intermediate`] : null;
+    const dip = byName[`${p}-phalanx-distal`];
     const tip = byName[`${p}-tip`];
     const mcpPos = mcp.getWorldPosition(tmp.clone());
     const tipPos = tip.getWorldPosition(new THREE.Vector3());
-    const reach = mcpPos.distanceTo(tipPos);            // MCP→tip (curl reach), meters
-    // segment lengths along the chain (consecutive joints incl. wrist→meta)
+    const reach = mcpPos.distanceTo(tipPos);          // MCP→tip (curl reach), meters
     const chainPts = [wrist.getWorldPosition(new THREE.Vector3()),
       ...joints.map(j => j.getWorldPosition(new THREE.Vector3()))];
     const segLen = [];
     for (let i = 0; i < chainPts.length - 1; i++) segLen.push(chainPts[i].distanceTo(chainPts[i + 1]));
-    const axisW = deriveAxisW([mcp, ...joints.filter(j => j !== mcp)]);
+
+    // root-local positions + bind quaternions (for reset during IK)
+    const pos = (o) => root.worldToLocal(o.getWorldPosition(new THREE.Vector3()));
+    const bindQ = {};
+    for (const j of [meta, mcp, pip, dip, tip].filter(Boolean)) bindQ[j.name] = j.quaternion.clone();
+    const axisW = new THREE.Vector3().setFromMatrixColumn(mcp.matrixWorld, 0).normalize();
+    // bone vectors (root-local) and out-of-plane components along axisW
+    const mcpP = pos(mcp), pipP = pos(pip||dip), dipP = pos(dip), tipP = pos(tip);
+    const b0 = pipP.clone().sub(mcpP), b1 = (pip?dipP.clone().sub(pipP):new THREE.Vector3()), b2 = tipP.clone().sub(dipP);
+    const out0 = b0.dot(axisW), out1 = b1.dot(axisW), out2 = b2.dot(axisW);
+    const L0 = b0.length(), L1 = b1.length(), L2 = b2.length();
+
     digits[f] = {
-      name: f, joints, mcp, tip, reach, segLen, axisW,
+      name: f, joints, meta, mcp, pip, dip, tip, reach, segLen, axisW,
+      bindQ, pos: { meta: pos(meta), mcp: mcpP, pip: pipP, dip: dipP, tip: tipP },
+      L0, L1, L2, out0, out1, out2,
       isThumb: f === 'thumb',
     };
   }
