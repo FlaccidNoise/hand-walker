@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { buildScene } from './src/scene.js';
 import { buildRig, FINGERS } from './src/rig.js';
-import { solveLeg, resetToBind, tipLocal, groundConstrain, padHeight } from './src/ik.js';
+import { solveLeg, resetToBind, tipLocal, groundConstrain, padHeight, foldAnnulus } from './src/ik.js';
 import { DebugDraw } from './src/debug.js';
 import * as C from './src/tuning.js';
 
@@ -57,50 +57,12 @@ async function init() {
   const clock = new THREE.Clock();
   let frames = 0, fpsT = 0;
 
-  // --- standH: lowest body height where every digit (incl. thumb) reaches its rest
-  //     ×0.97 through the REAL solve stack (solveLeg + ground constraint) with tip
-  //     err < BAND_TIP_ERR. The pinky pins it (§5). ---
-  // solveLeg works in ROOT-local (bind meters); targets go through root.worldToLocal.
-  // Post-constraint tip error is measured in WORLD units (the constraint yanks the tip
-  // off-target whenever a knuckle would be underground, so those heights self-reject).
-  const body = rig.mount;
-  const feet = {};
-  const tmp = new THREE.Vector3();
-  body.position.set(0, 0, 0); rig.root.updateMatrixWorld(true);
-  for (const f of FINGERS) {
-    const d = rig.digits[f];
-    const tipW = rig.root.localToWorld(d.pos.tip.clone());   // bind rest, world at body y=0
-    const mcpW = rig.root.localToWorld(d.pos.mcp.clone());
-    feet[f] = new THREE.Vector3(
-      mcpW.x + C.REST_SCALE * (tipW.x - mcpW.x), padHeight(d),
-      mcpW.z + C.REST_SCALE * (tipW.z - mcpW.z));
-  }
-  const plantDigit = (f) => {
-    const d = rig.digits[f];
-    // the MCP knuckle dome is BODY geometry — IK can't lift it, so a buried dome
-    // invalidates the height outright (returns err = Infinity)
-    if (d.mcp.getWorldPosition(tmp).y < padHeight(d)) return Infinity;
-    solveLeg(d, rig.root.worldToLocal(feet[f].clone()), { root: rig.root });
-    groundConstrain(d, rig.root);
-    return d.tip.getWorldPosition(tmp).distanceTo(feet[f]); // world-unit tip err
-  };
-  let standH = 0;
-  const perDigitH = {};
-  for (let h = 0.20; h <= 0.85; h += 0.002) {
-    body.position.y = h; rig.root.updateMatrixWorld(true);
-    let allOk = true;
-    for (const f of FINGERS) {
-      if (plantDigit(f) > C.BAND_TIP_ERR) { allOk = false; break; }
-      if (perDigitH[f] == null) perDigitH[f] = h;            // first (lowest) h each digit reaches
-    }
-    if (allOk) { standH = h; break; }                       // lowest h where ALL reach
-  }
-  // settle at standH, plant every digit to its foot
-  body.position.y = standH; rig.root.updateMatrixWorld(true);
-  const plantErr = {};
-  for (const f of FINGERS) plantErr[f] = plantDigit(f);
-  window.__stand = { standH, perDigitH, plantErr, feet };
-  controls.target.set(0, standH, 0); camera.position.set(1.4, 0.9 + standH, 2.0); controls.update();
+  const t0 = performance.now();
+  const calib = calibrate(rig);
+  calib.calibMs = performance.now() - t0;
+  __hand.calib = calib;
+  window.__stand = calib;                                    // legacy probe handle
+  controls.target.set(0, calib.standH, 0); camera.position.set(1.4, 0.9 + calib.standH, 2.0); controls.update();
 
   function loop() {
     requestAnimationFrame(loop);
@@ -117,6 +79,122 @@ async function init() {
   }
   loop();
   state.ready = true;
+}
+
+// --- calibrate() — §4.4 stance-band calibration, THE load-bearing scan. ---
+// Reachability is measured through the REAL solve stack (solveLeg + ground constraint):
+// the analytic chord over-promises. Deterministic — no wall clock, fixed sample grids.
+// solveLeg works in ROOT-local (bind meters); targets go through root.worldToLocal;
+// tip error is measured in WORLD units. A buried MCP knuckle-dome (body geometry — IK
+// can't lift it) invalidates a height outright.
+function calibrate(rig) {
+  const body = rig.mount;
+  const tmp = new THREE.Vector3();
+  const setPose = (h, walk) => {
+    body.position.set(0, h, 0);
+    body.rotation.set(walk ? C.TUNE.walkRoll : 0, 0, walk ? C.TUNE.walkPitch : 0);
+    rig.root.updateMatrixWorld(true);
+  };
+
+  // foot rests: bind tip xz pulled 3% toward the MCP (§5 standH rule), pad height up
+  const feet = {};
+  setPose(0, false);
+  for (const f of FINGERS) {
+    const d = rig.digits[f];
+    const tipW = rig.root.localToWorld(d.pos.tip.clone());
+    const mcpW = rig.root.localToWorld(d.pos.mcp.clone());
+    feet[f] = new THREE.Vector3(
+      mcpW.x + C.REST_SCALE * (tipW.x - mcpW.x), padHeight(d),
+      mcpW.z + C.REST_SCALE * (tipW.z - mcpW.z));
+  }
+  const solveTo = (d, target) => {
+    solveLeg(d, rig.root.worldToLocal(target.clone()), { root: rig.root });
+    groundConstrain(d, rig.root);
+    return d.tip.getWorldPosition(tmp).distanceTo(target);   // world-unit tip err
+  };
+  const plantDigit = (f) => {
+    const d = rig.digits[f];
+    if (d.mcp.getWorldPosition(tmp).y < padHeight(d)) return Infinity;
+    return solveTo(d, feet[f]);
+  };
+
+  // --- standH: lowest body height where every digit (incl. thumb) plants (§5) ---
+  let standH = 0;
+  const perDigitH = {};
+  for (let h = 0.20; h <= 0.85; h += 0.002) {
+    setPose(h, false);
+    let allOk = true;
+    for (const f of FINGERS) {
+      if (plantDigit(f) > C.BAND_TIP_ERR) { allOk = false; break; }
+      if (perDigitH[f] == null) perDigitH[f] = h;
+    }
+    if (allOk) { standH = h; break; }
+  }
+
+  // --- stance bands: scan each leg's foot along its lane (MCP-relative forward
+  // offset s, constant lateral z) at the walking pose; keep the contiguous window
+  // (containing the best sample) where tip err < BAND_TIP_ERR ---
+  const scanBand = (f, h, step = C.BAND_S_STEP) => {
+    setPose(h, true);
+    const d = rig.digits[f];
+    const mcpW = d.mcp.getWorldPosition(tmp);
+    if (mcpW.y < padHeight(d)) return null;
+    const mcpX = mcpW.x;
+    const target = new THREE.Vector3(0, padHeight(d), feet[f].z);
+    d.yaw = 0;                                               // deterministic branch seed
+    const runs = []; let cur = null, minErr = Infinity, minS = null;
+    for (let s = C.BAND_S_MIN; s <= C.BAND_S_MAX + 1e-9; s += step) {
+      target.x = mcpX + s;
+      const err = solveTo(d, target);
+      if (err < minErr) { minErr = err; minS = s; }
+      if (err < C.BAND_TIP_ERR) { if (cur) cur.hi = s; else runs.push(cur = { lo: s, hi: s }); }
+      else cur = null;
+    }
+    return runs.find(r => minS >= r.lo && minS <= r.hi) ?? null;
+  };
+  const walkH = standH * C.POSE_CROUCH + C.POSE_SAG;
+
+  // --- walk pitch ("set at rig time from bind geometry"): nose-up pitch about the
+  // wrist lifts the knuckle dome (MCPs sit forward of the wrist) and shifts knuckles
+  // forward of bind (§4.6). Read-only scan with the real solver (§8): keep the
+  // smallest pitch that maximizes the weakest digit's band at the walk pose. ---
+  let bestPitch = 0, bestScore = -1;
+  for (let p = 0; p <= 0.4 + 1e-9; p += 0.05) {
+    C.TUNE.walkPitch = p;
+    let score = Infinity;
+    for (const f of FINGERS) {
+      const b = scanBand(f, walkH, 0.03);
+      score = Math.min(score, b ? b.hi - b.lo : 0);
+      if (score === 0) break;
+    }
+    if (score > bestScore + 1e-9) { bestScore = score; bestPitch = p; }
+  }
+  C.TUNE.walkPitch = bestPitch;
+
+  const bands = {}, workC = {}, dMin = {};
+  for (const f of FINGERS) {
+    bands[f] = scanBand(f, walkH);
+    workC[f] = bands[f] ? (bands[f].lo + bands[f].hi) / 2 : null;
+    dMin[f] = foldAnnulus(rig.digits[f]);
+  }
+  const strideMax = Math.min(...FINGERS.map(f => bands[f] ? bands[f].hi - bands[f].lo : 0));
+
+  // --- per-height band table (§4.4): each landing queries the band at the height the
+  // foot will actually land at. TUNE.liveBands=1 uses it; 0 is the A/B control. ---
+  const bandTable = [];
+  for (let i = 0; i < C.BAND_HEIGHT_SAMPLES; i++) {
+    const h = walkH - C.BAND_HEIGHT_RANGE
+      + (2 * C.BAND_HEIGHT_RANGE * i) / (C.BAND_HEIGHT_SAMPLES - 1);
+    const row = { h };
+    for (const f of FINGERS) row[f] = scanBand(f, h);
+    bandTable.push(row);
+  }
+
+  // settle: park at standH with every digit planted at its rest
+  setPose(standH, false);
+  const plantErr = {};
+  for (const f of FINGERS) { rig.digits[f].yaw = 0; plantErr[f] = plantDigit(f); }
+  return { standH, walkH, perDigitH, plantErr, feet, bands, workC, dMin, strideMax, bandTable };
 }
 
 function devHUD(fps, dt, rig) {

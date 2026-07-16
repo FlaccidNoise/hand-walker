@@ -99,6 +99,12 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
   // --- scale so middle-finger reach (MCP→tip) = 1 world unit ---
   const middleReach = digits.middle.reach;
   const scale = 1 / middleReach;
+  // world-unit inner chord per digit (fold annulus input — keeps ik.js unit-clean)
+  for (const f of FINGERS) {
+    const d = digits[f];
+    d.innerW = Math.abs(d.L0 - (d.L1 + d.L2)) * scale;
+    d.reachW = d.reach * scale;
+  }
   const WORLD_M = middleReach;                          // meters per world unit (1u ≈ middle reach)
   const G = C.G_SI / WORLD_M;                            // fierce gravity (u/s^2)
 

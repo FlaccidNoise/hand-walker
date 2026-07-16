@@ -75,6 +75,9 @@ export const CALIB_DT = 0.05;         // fixed dt, no wall clock → bit-exact
 export const BAND_TIP_ERR = 0.025;    // contiguous window kept where tip err < this
 export const BAND_HEIGHT_SAMPLES = 25; // per-height band table over ±0.15 of standH
 export const BAND_HEIGHT_RANGE = 0.15;
+export const BAND_S_MIN = -0.3;       // lane scan: foot offset forward of the live MCP
+export const BAND_S_MAX = 1.2;
+export const BAND_S_STEP = 0.01;
 export const POSE_CROUCH = 0.95;      // crouch −5%
 export const POSE_SAG = -0.035;       // sag
 

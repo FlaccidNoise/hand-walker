@@ -178,8 +178,8 @@ export function padReach(d) { return d.reach; }            // MCP→tip curl rea
 // Computed from mesh vertices at rig time (rig.js fills d.flesh). Fallback 0.012u.
 export function padHeight(d) { return d.flesh ?? 0.012; }
 
-// fold annulus dMin: the minimum reachable in-plane distance (inner chord) — below it the
-// finger must fold (tuck) rather than reach. dMin = dMinK · |L0 - (L1+L2)| + arcClear margin.
+// fold annulus dMin (WORLD units): the minimum reachable in-plane distance (inner
+// chord) — below it the finger must fold (tuck) rather than reach.
 export function foldAnnulus(d) {
-  return C.TUNE.dMinK * Math.abs(d.L0 - (d.L1 + d.L2)) + C.TUNE.arcClear;
+  return C.TUNE.dMinK * d.innerW + C.TUNE.arcClear;
 }
