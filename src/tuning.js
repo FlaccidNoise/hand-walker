@@ -51,7 +51,9 @@ export const BAND_UTIL = 0.8;          // cadence law targets this fraction of t
                                        // 0.9/1.0 raise edge drift more than fewer steps save
 
 // --- Steering ---
-export const V_MAX = 2.6;             // u/s leash / gamepad top (walk→run)
+export const V_MAX = 3.4;             // u/s leash top — raised from 2.6: at 2.5 the user
+                                      // couldn't tell run from walk; verify slide at 3.4
+                                      // via probe (QA runFast still commands 2.5)
 
 // --- Speed crossover V_MOVE: aloft only active while speed > this ---
 export const V_MOVE = 0.15;

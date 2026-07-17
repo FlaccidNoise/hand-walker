@@ -67,6 +67,19 @@ export function makeBrain(sim, rig, camera) {
       const dx = a.target.x - body.position.x, dz = a.target.z - body.position.z;
       const d = Math.hypot(dx, dz);
       if (d < 0.15) { sim.autoWalk(0, 0); return DONE; }
+      // face big course changes with a pivot first — steering while walking turns
+      // via a slow wide arc (the "turn around and walk back" long-way-around bug);
+      // pivoting is what makes reversals read nimble. One pivot max per action.
+      const bearingErr = M.wrapAngle(Math.atan2(-dz, dx) - sim.s.heading);
+      if (!a.pivoted && Math.abs(bearingErr) > 1.0 && d > 0.5) {
+        if (sim.s.pivotTarget != null) return RUNNING;   // pivot in progress
+        sim.autoWalk(0, 0);
+        if (sim.s.speed > C.V_MOVE) return RUNNING;      // brake to stance first
+        if (sim.pivot(bearingErr * 180 / Math.PI)) return RUNNING;
+        a.pivoted = true;                                // refused (busy) — walk the arc
+      }
+      if (sim.s.pivotTarget != null) return RUNNING;
+      a.pivoted = true;
       const v = Math.min(a.speed ?? 0.8, Math.max(0.4, 2 * d));  // arrival damping
       sim.autoWalk(dx / d * v, dz / d * v);
       return RUNNING;
@@ -84,7 +97,7 @@ export function makeBrain(sim, rig, camera) {
     wait: (a) => (a.s ?? 1) + 1,
     jump: () => 5,
     gesture: () => 8,
-    walk: (a) => 4 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),
+    walk: (a) => 6 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // +2s: possible lead-in pivot
     turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
   };
 
@@ -119,7 +132,7 @@ export function makeBrain(sim, rig, camera) {
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
 - {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted)
-- {"do":"walk","forward":F,"right":R,"speed":S} — walk to an offset in YOUR body frame; negative allowed. You end up facing your direction of travel. Units: world units, your body is ~2 long; typical distances 1-6. "speed" (u/s) sets your pace: ~0.8 (default, relaxed) for a normal walk, ~1.5 for a jog/trot, ~2.2-2.5 for a full run — use a higher speed whenever told to hurry, run, or race, or when the situation is urgent/excited.
+- {"do":"walk","forward":F,"right":R,"speed":S} — walk to an offset in YOUR body frame; negative allowed. You end up facing your direction of travel. Units: world units, your body is ~2 long; typical distances 1-6. "speed" (u/s) sets your pace: ~0.8 (default, relaxed) for a normal walk, ~1.6 for a jog/trot, ~3-3.4 for a FULL SPRINT — use a higher speed whenever told to hurry, run, or race, or when the situation is urgent/excited.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
 - {"do":"jump"}
 - {"do":"wait","s":S}
