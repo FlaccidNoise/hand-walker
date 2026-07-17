@@ -177,14 +177,22 @@ function makeSim(rig, calib) {
   // gesture engine (buddy vocabulary): a timed pose-script layer over the standing
   // stance. Body-pose offsets absorb automatically (planted legs re-solve to their
   // pinned world feet every frame); digits via pose tracks in src/gestures.js.
-  const NO_GESTURE = { pitch: 0, roll: 0, heading: 0, height: 0 };
+  const NO_GESTURE = { pitch: 0, roll: 0, heading: 0, height: 0, lift: 0 };
   function gesturePose() {
     const g = s.gesture, b = g && g.def.body;
     if (!b) return NO_GESTURE;
     const u = g.t / g.dur;
     return { pitch: sampleTrack(b.pitch, u), roll: sampleTrack(b.roll, u),
-      heading: 0, height: sampleTrack(b.height, u) };
+      heading: 0, height: sampleTrack(b.height, u), lift: sampleTrack(b.lift, u) };
   }
+  // hover gestures (thumbsUp/thumbsDown/flipBird): the whole hand leaves the ground
+  // (def.hover === true) — every digit gets a pose-track entry (def.digits[f] for
+  // all five), so the EXISTING single-digit gesture-pose branch in the per-leg loop
+  // already generalizes with no new branching there. What hover DOES need: body.lift
+  // driving body.position.y directly (the capped-force stance spring can't produce a
+  // clean full liftoff) and the grounded physics/belly-scrape blocks skipped — see
+  // step(). Re-plants via applyBodyPose+reseedFeet on end, mirroring jump's landing.
+  const hovering = () => !!(s.gesture && s.gesture.def.hover);
   const cancelIdle = () => { if (s.gesture && s.gesture.idle) s.gesture = null; };
   const markInput = () => { cancelIdle(); s.lastInput = s.time; };
   function gesture(name) {
@@ -426,8 +434,13 @@ function makeSim(rig, calib) {
     s.speed = Math.hypot(s.v.x, s.v.z);
     // gesture engine: block/cancel while airborne or moving (locomotion owns the pose then)
     if (s.gesture) {
+      const wasHover = hovering();
       if (s.airborne || s.speed > C.V_MOVE) s.gesture = null;
       else { s.gesture.t += dt; if (s.gesture.t >= s.gesture.dur) s.gesture = null; }
+      if (wasHover && !s.gesture) {                        // hover end: never sets s.airborne,
+        body.position.y = calib.standH; s.vy = 0;          // so it never trips the jump-landing
+        applyBodyPose(); reseedFeet();                     // check below — replant explicitly
+      }
     } else if (!s.airborne && s.f === 0 && s.speed <= C.V_MOVE
         && s.time - s.lastInput > C.IDLE_AFTER && s.time >= s.nextIdleAt) {
       // left alone: weighted-random subtle idle; any input cancels instantly
@@ -460,24 +473,30 @@ function makeSim(rig, calib) {
     }
     body.position.x += s.v.x * dt;
     body.position.z += s.v.z * dt;
-    body.position.y += s.vy * dt;
+    // hover: direct Y from the lift track, no ballistic fall — the capped-force
+    // stance spring can't produce a clean full liftoff (planted is already 0 while
+    // hovering, so N/traction above are already no-ops; this replaces the integrator)
+    if (hovering()) { body.position.y = calib.standH + gesturePose().lift; s.vy = 0; }
+    else body.position.y += s.vy * dt;
     if (s.airborne && s.vy <= 0 && body.position.y <= calib.standH) {
       s.airborne = false; s.vy *= 0.1;                       // touchdown; springs absorb the rest
       applyBodyPose(); reseedFeet();
     }
     applyBodyPose();
-    // palm/stump belly bottoms out at the floor and scrapes (§4.8) — mesh-measured depth
-    let pen = groundY(body.position.x, body.position.z) + rig.palmDepth - body.position.y;
-    for (const f of FINGERS) {
-      const p = rig.digits[f].mcp.getWorldPosition(_a);
-      pen = Math.max(pen, groundY(p.x, p.z) + 0.012 - p.y);
-    }
-    if (pen > 0) {
-      body.position.y += pen;
-      s.vy = Math.max(s.vy, 0);
-      const drag = Math.exp(-8 * dt);                        // sliding friction
-      s.v.x *= drag; s.v.z *= drag;
-      applyBodyPose();
+    if (!hovering()) {                                       // belly/knuckle scrape assumes an
+      // palm/stump belly bottoms out at the floor and scrapes (§4.8) — mesh-measured depth
+      let pen = groundY(body.position.x, body.position.z) + rig.palmDepth - body.position.y;
+      for (const f of FINGERS) {
+        const p = rig.digits[f].mcp.getWorldPosition(_a);
+        pen = Math.max(pen, groundY(p.x, p.z) + 0.012 - p.y);
+      }
+      if (pen > 0) {
+        body.position.y += pen;
+        s.vy = Math.max(s.vy, 0);
+        const drag = Math.exp(-8 * dt);                      // sliding friction
+        s.v.x *= drag; s.v.z *= drag;
+        applyBodyPose();
+      }
     }
 
     // --- phase engine (§4.5): cadence solved for zero foot-slip. Rotation IS slip

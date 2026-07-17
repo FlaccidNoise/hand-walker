@@ -1,16 +1,28 @@
 // src/gestures.js — gesture pose-track definitions + sampler (buddy vocabulary).
-// A gesture: { dur, body?: {pitch,roll,height: Track}, splay?: {fingers,track},
+// A gesture: { dur, hover?: true, body?: {pitch,roll,height,lift: Track},
+//   splay?: {fingers,track},
 //   digits?: { finger: { base:{yaw,mcp,pip}, yaw?/mcp?/pip?: Track, win?:[u0,u1] } } }.
 // Track = [[u, value], ...], u in 0..1 of dur — smoothstep between keys, clamped at
 // the ends. Digit tracks add to base; u is re-normalized to the win window, and the
 // digit re-plants via a real swing when the window closes (main.js aloft-exit path).
 //
+// hover: true (thumbsUp/thumbsDown/flipBird) lifts the WHOLE hand off the ground —
+// every digit needs a `digits[f]` entry (no digit falls through to stance/tuck), and
+// `body.lift` is a direct world-Y offset (bypasses the capped-force stance spring,
+// which can't produce a clean full liftoff — see main.js's `hovering()`). Large body
+// reorientation for a hover MUST use `roll`, not `pitch`: body pose is applied as
+// Euler order YZX (roll, heading, pitch) — pitch is the MIDDLE axis, which gimbal-
+// locks at ±90°; roll is the last axis and doesn't. heading always stays 0 (below).
+//
 // Authoring rules (refuted approaches — do not rediscover):
 // - NO body heading track, ever: ±0.25 rad heading with world-pinned feet drives
 //   stance err past the 0.05 rescue threshold → every digit re-swings (traced).
 //   Head-shake motion comes from a digit (see 'no').
-// - Digit base poses stay part-curled (pip ≥ ~0.5): near-straight bases at
-//   RATE_CARRY 7 sweep a long lever arc and visibly snap (measured 0.107u/frame).
+// - Digit base poses stay part-curled (pip ≥ ~0.5) for any digit meant to read as
+//   EXTENDED: near-straight bases at RATE_CARRY 7 sweep a long lever arc and
+//   visibly snap (measured 0.107u/frame) — this applies to hover's extended digit
+//   too, since it's driven through the same poseLeg/RATE_CARRY path. A FIST
+//   (high curl) is the opposite lever case and is not at risk.
 
 export function sampleTrack(track, u) {
   if (!track) return 0;
@@ -39,6 +51,8 @@ function osc(cycles, amp, env) {
 const CURL = { yaw: 0, mcp: 0, pip: 0.5 };   // lifted part-curled base (the "no" point)
 const WAVE_CURL = { yaw: 0, mcp: -0.25, pip: 0.65 };
 const WAVE_BOB = osc(2, 0.3);
+const FIST = { yaw: 0, mcp: 1.3, pip: 1.6 };  // tight curl for the 4 non-extended hover digits
+const HOVER_LIFT = [[0, 0], [0.15, 0.22], [0.6, 0.2], [0.85, 0.05], [1, 0]];
 
 export const GESTURES = {
   yes: { dur: 1.1, body: { pitch: osc(2, 0.16) } },
@@ -104,6 +118,35 @@ export const GESTURES = {
       mcp: [[0, 0], [0.08, -0.15], [0.16, 0.4], [0.22, 0.4], [0.3, -0.15],
         [0.38, 0.4], [0.44, 0.4], [0.52, -0.15], [0.6, 0.4], [0.66, 0.4],
         [0.74, -0.15], [0.82, 0.4], [0.88, 0.4], [1, 0]] } },
+  },
+  // hover: full liftoff, fist + one extended digit, big body roll (thumb swings
+  // from its neutral lateral position to point up/down)
+  thumbsUp: {
+    dur: 1.8, hover: true,
+    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.7, -1.4], [0.95, -0.15], [1, 0]] },
+    digits: {
+      thumb: { base: CURL }, index: { base: FIST }, middle: { base: FIST },
+      ring: { base: FIST }, pinky: { base: FIST },
+    },
+  },
+  thumbsDown: {
+    dur: 1.8, hover: true,
+    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, 1.4], [0.7, 1.4], [0.95, 0.15], [1, 0]] },
+    digits: {
+      thumb: { base: CURL }, index: { base: FIST }, middle: { base: FIST },
+      ring: { base: FIST }, pinky: { base: FIST },
+    },
+  },
+  // middle finger extended, same roll thumbsUp/Down use (pitch was tried first —
+  // rejected in-sim, the whole hand read as bunched to one side instead of a clean
+  // one-finger-up silhouette; roll reads cleanly since it already works for thumb)
+  flipBird: {
+    dur: 1.8, hover: true,
+    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.7, -1.4], [0.95, -0.15], [1, 0]] },
+    digits: {
+      middle: { base: CURL }, thumb: { base: FIST }, index: { base: FIST },
+      ring: { base: FIST }, pinky: { base: FIST },
+    },
   },
 };
 
