@@ -99,9 +99,20 @@ by probe numbers.
 | `main.js` | rideT/hover-Y/landing-check all terrain-relative now |
 | `src/gestures.js` | thumbsUp/thumbsDown defs — re-check live if user reports flipped again |
 
+## Voice (added 2026-07-18)
+- Gemini TTS (`gemini-3.1-flash-tts-preview`) via `POST /tts` in serve.py; browser
+  decodes raw s16 **little-endian** PCM (the `audio/l16` mime lies — verified by
+  waveform-smoothness comparison, 568 vs 14122 mean|Δ|) into an AudioContext.
+- Persona = `TTS_VOICE ('Charon')` + `TTS_STYLE` (British-butler style directive)
+  at the top of brain.js's speak section — the two dials for changing how he
+  sounds. Errors surface in the status bar then fall back to speechSynthesis.
+- User has NOT yet judged the actual sound — voice choice may need iteration
+  (other male-leaning prebuilts to try: Puck, Fenrir, Enceladus, Iapetus).
+
 ## Context & Warnings
-- Dev server needs `GEMINI_API_KEY` in env (`source ~/.zshrc` first); `/llm` 503s
-  visibly without it. Model: gemini-2.5-flash (3.5-flash leaks thinking text).
+- Dev server needs `GEMINI_API_KEY` in env (`source ~/.zshrc` first); `/llm` and
+  `/tts` 503 visibly without it. Models: gemini-2.5-flash for planning (3.5-flash
+  leaks thinking text), gemini-3.1-flash-tts-preview for voice.
 - Verify HEADLESS only; check `uptime` before trusting any qa-gate numbers.
 - ES modules don't hot-reload — a live browser tab can run stale code indefinitely;
   when a user reports a visual bug already fixed in source, ask for a hard reload
