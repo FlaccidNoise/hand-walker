@@ -148,12 +148,30 @@ export const GESTURES = {
       ring: { base: FIST }, pinky: { base: FIST },
     },
   },
+  // nap: settle low, pitch nose-down, curl slightly, and breathe slowly for the
+  // whole hold — user-invokable ("take a nap") and the payoff of the 'nap' idle
+  // behavior. Long dur is fine: any input cancels via the normal gesture path.
+  sleep: {
+    dur: 16,
+    body: {
+      height: (() => {
+        const keys = [[0, 0], [0.05, -0.1]];
+        for (let k = 0; k <= 16; k++)
+          keys.push([0.06 + 0.86 * k / 16, -0.1 + 0.015 * Math.sin(2 * Math.PI * 4 * k / 16)]);
+        keys.push([1, 0]);
+        return keys;
+      })(),
+      pitch: [[0, 0], [0.06, 0.07], [0.94, 0.07], [1, 0]],
+      roll:  [[0, 0], [0.06, 0.06], [0.94, 0.06], [1, 0]],
+    },
+  },
 };
 
 // idles: subtle low-amplitude fidgets, weighted-random after IDLE_AFTER s without
 // input (see step()); same format, w = pick weight
 const DRUM_BASE = { yaw: 0, mcp: -0.1, pip: 1.1 };
 const DRUM_STROKE = [[0, 0], [0.3, -0.15], [0.55, 0.4], [0.7, 0.4], [1, 0]];
+const STRETCH = { yaw: 0, mcp: -0.35, pip: 0.5 };
 export const IDLES = {
   breathe: { w: 4, dur: 3.5, body: { height: osc(2, 0.015) } },
   shift:   { w: 2, dur: 2.8, body: { roll: osc(1, 0.06) } },
@@ -164,5 +182,24 @@ export const IDLES = {
       middle: { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.22, 0.57] },
       ring:   { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.44, 0.79] },
     },
+  },
+  // cat stretch: all four fingers extend forward while the body rears slightly
+  stretch: {
+    w: 2, dur: 2.8,
+    body: { pitch: [[0, 0], [0.3, -0.07], [0.7, -0.06], [1, 0]] },
+    digits: {
+      index:  { base: STRETCH, win: [0.05, 0.9] }, middle: { base: STRETCH, win: [0.08, 0.92] },
+      ring:   { base: STRETCH, win: [0.08, 0.92] }, pinky:  { base: STRETCH, win: [0.05, 0.9] },
+    },
+  },
+  // periscope peek: rise up and sway slowly side to side, looking around
+  peek: {
+    w: 2, dur: 3.6,
+    body: { height: [[0, 0], [0.2, 0.07], [0.8, 0.07], [1, 0]], roll: osc(1, 0.12) },
+  },
+  // idle scritch: index scratches the floor absently
+  scratch: {
+    w: 1, dur: 2.2,
+    digits: { index: { base: { yaw: 0, mcp: -0.05, pip: 1.05 }, mcp: osc(5, 0.12), win: [0.1, 0.9] } },
   },
 };

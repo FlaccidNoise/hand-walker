@@ -152,6 +152,13 @@ export const NEIGHBORS = {
 export const IDLE_AFTER = 8;          // s sim since last input before idles start —
                                       // must exceed every QA quiet stretch (rest = 3 s)
 export const IDLE_GAP = 5;            // s sim between idles (±30% jitter)
+export const BEHAVE_AFTER = 30;       // s sim of USER quiet before brain-level idle
+                                      // behaviors (wander/nap/…) — sim-level micro-idles
+                                      // (IDLE_AFTER) fire much sooner and layer beneath
+export const BEHAVE_GAP = 35;         // s sim between behaviors (×0.7-1.5 jitter)
+export const BEHAVE_SIM_QUIET = 12;   // s sim with NO sim input before behaviors may fire —
+                                      // must exceed every QA quiet stretch (~5 s max), or
+                                      // behaviors contaminate the gate like idles would
 
 // --- Pivot-in-place (turn-nimbly): decoupled from the walk-and-turn steering above.
 // Landing math has its own branch in startSwing (rest foot rotated to the predicted

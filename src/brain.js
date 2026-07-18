@@ -7,6 +7,7 @@
 // which stays limited by the anatomical finger-yaw cone (turnCycle red-by-choice).
 import * as C from './tuning.js';
 import * as M from './math.js';
+import { GESTURES } from './gestures.js';
 
 const RUNNING = 0, DONE = 1;
 
@@ -89,8 +90,14 @@ export function makeBrain(sim, rig, camera) {
       return RUNNING;
     },
     walkTo(a, dt) {                                      // world-coordinate variant — the
-      if (!a.target) a.target = clampRoom({ x: a.x ?? 0, z: a.z ?? 0 });  // room map speaks
-      return ACTIONS.walk(a, dt);                        // in these; reuses walk wholesale
+      if (!a.target) {                                   // room map speaks in these
+        a.target = clampRoom({ x: a.x ?? 0, z: a.z ?? 0 });
+        // timeout from INITIAL distance, frozen — recomputing per-tick shrinks it
+        // toward the floor as the hand approaches while elapsed keeps growing,
+        // spuriously killing long slow walks (bit the napping behavior at 9s)
+        a.tmo = 6 + 3 * Math.hypot(a.target.x - body.position.x, a.target.z - body.position.z);
+      }
+      return ACTIONS.walk(a, dt);                        // reuses walk wholesale
     },
     turn(a) {                                            // pivot-in-place, zero translation
       if (!a.started) {
@@ -104,24 +111,72 @@ export function makeBrain(sim, rig, camera) {
   const TIMEOUT = {
     wait: (a) => (a.s ?? 1) + 1,
     jump: () => 5,
-    gesture: () => 8,
+    gesture: (a) => (GESTURES[a.name]?.dur ?? 4) + 4,      // sleep is 16s — dur-aware
     walk: (a) => 6 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // +2s: possible lead-in pivot
-    walkTo: (a) => 6 + 2 * Math.hypot((a.x ?? 0) - body.position.x, (a.z ?? 0) - body.position.z),
+    walkTo: (a) => a.tmo ?? 30,
     turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
   };
 
-  function run(plan) {
+  function run(plan, tag = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
+    // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
+    plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
     st.i = 0;
-    setStatus('acting', `1/${plan.length} ${plan[0].do}`);
+    st.tag = tag;                                        // idle behaviors show 'idling', not 'acting'
+    setStatus(tag ? 'idling' : 'acting', tag ?? `1/${plan.length} ${plan[0].do}`);
     return true;
   }
   function stop() {
-    if (st.i >= 0 || st.status !== 'idle') { sim.autoWalk(0, 0); st.i = -1; setStatus('idle'); }
+    if (st.i >= 0 || st.status !== 'idle') { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); }
+  }
+
+  // ---- idle behaviors: compound plans when the USER goes quiet. Tracks its own
+  // user-inactivity clock — the sim's lastInput is useless here because the
+  // behaviors' own autoWalk/gesture calls stamp it.
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const BEHAVIORS = [
+    { name: 'wandering', w: 4, plan: () => [
+      { do: 'walkTo', ...clampRoom({ x: rnd(-4.5, 4.5), z: rnd(-4.5, 4.5) }), speed: rnd(0.5, 0.8) },
+      { do: 'wait', s: rnd(1, 2.5) } ] },
+    { name: 'looking about', w: 3, plan: () => [
+      { do: 'turn', deg: rnd(40, 90) }, { do: 'wait', s: rnd(0.8, 1.5) },
+      { do: 'turn', deg: -rnd(60, 140) }, { do: 'wait', s: 1 },
+      { do: 'gesture', name: 'thinking' } ] },
+    { name: 'napping', w: 2, plan: () => [
+      { do: 'walkTo', ...clampRoom({ x: rnd(-4, -2), z: rnd(-4, -2) }), speed: 0.5 },  // cozy back corner
+      { do: 'gesture', name: 'sleep' } ] },
+    { name: 'fidgeting', w: 2, plan: () => [
+      { do: 'gesture', name: Math.random() < 0.5 ? 'tap' : 'beckon' },
+      { do: 'wait', s: 1 }, { do: 'jump' } ] },
+    { name: 'visiting the step', w: 2, plan: () => [
+      { do: 'walkTo', x: 0, z: 2.4, speed: 0.6 }, { do: 'wait', s: rnd(1, 2) },
+      { do: 'gesture', name: 'thinking' } ] },
+  ];
+  let bClock = 0, lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER;
+  function behave(name) {                                 // also a headless test hook
+    const b = BEHAVIORS.find(x => x.name === name) ?? BEHAVIORS[0];
+    return run(b.plan(), b.name);
+  }
+  function maybeBehave() {
+    if (st.i >= 0 || st.status !== 'idle') return;
+    if (sim.s.airborne || sim.s.speed > C.V_MOVE) return;
+    // require the SIM quiet too, not just the user: the QA harness drives the sim
+    // through __hand without ever calling ask(), and a behavior firing during a
+    // scenario's settle window contaminates its measurements. QA's longest quiet
+    // stretch is ~5 s; a live user going silent passes this a few seconds after
+    // the micro-idles start.
+    if (sim.s.time - sim.s.lastInput < C.BEHAVE_SIM_QUIET) return;
+    if (bClock - lastUserAt < C.BEHAVE_AFTER || bClock < nextBehaviorAt) return;
+    let r = Math.random() * BEHAVIORS.reduce((a, b) => a + b.w, 0);
+    const b = BEHAVIORS.find(x => (r -= x.w) <= 0) ?? BEHAVIORS[0];
+    run(b.plan(), b.name);
+    nextBehaviorAt = bClock + C.BEHAVE_GAP * rnd(0.7, 1.5);
   }
   function tick(dt) {
+    bClock += dt;
+    maybeBehave();
     if (st.i < 0) return;
     const a = st.plan[st.i];
     a.t += dt;
@@ -130,8 +185,8 @@ export function makeBrain(sim, rig, camera) {
     try { r = ACTIONS[a.do](a, dt); } catch (e) { return fail(String(e)); }
     if (r === DONE) {
       st.i++;
-      if (st.i >= st.plan.length) { st.i = -1; setStatus('idle'); }
-      else setStatus('acting', `${st.i + 1}/${st.plan.length} ${st.plan[st.i].do}`);
+      if (st.i >= st.plan.length) { st.i = -1; st.tag = null; setStatus('idle'); }
+      else if (!st.tag) setStatus('acting', `${st.i + 1}/${st.plan.length} ${st.plan[st.i].do}`);
     }
   }
 
@@ -140,7 +195,7 @@ export function makeBrain(sim, rig, camera) {
 
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
-- {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted)
+- {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest")
 - {"do":"walkTo","x":X,"z":Z,"speed":S} — walk to a WORLD position in your room (preferred for going places). "speed" (u/s): ~0.8 relaxed default, ~1.6 jog, ~3-3.4 FULL SPRINT — sprint when told to hurry/run/race or when excited.
 - {"do":"walk","forward":F,"right":R,"speed":S} — walk a relative offset in YOUR body frame (for "back up a bit", "come closer"); negative allowed. You end up facing your travel direction.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
@@ -166,6 +221,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
   }
   async function ask(text) {
     stop();
+    lastUserAt = bClock;                                 // real user input — behaviors reschedule
     setStatus('thinking', text);
     history.push({ role: 'user', parts: [{ text: `${stateLine()} ${text}` }] });
     while (history.length > 12) history.shift();
@@ -232,5 +288,5 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak };
+  return { st, run, stop, tick, ask, speak, behave };
 }
