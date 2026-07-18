@@ -438,7 +438,8 @@ function makeSim(rig, calib) {
       if (s.airborne || s.speed > C.V_MOVE) s.gesture = null;
       else { s.gesture.t += dt; if (s.gesture.t >= s.gesture.dur) s.gesture = null; }
       if (wasHover && !s.gesture) {                        // hover end: never sets s.airborne,
-        body.position.y = calib.standH; s.vy = 0;          // so it never trips the jump-landing
+        body.position.y = groundY(body.position.x, body.position.z) + calib.standH;
+        s.vy = 0;                                          // so it never trips the jump-landing
         applyBodyPose(); reseedFeet();                     // check below — replant explicitly
       }
     } else if (!s.airborne && s.f === 0 && s.speed <= C.V_MOVE
@@ -451,7 +452,12 @@ function makeSim(rig, calib) {
       s.nextIdleAt = s.time + IDLES[name].dur + C.IDLE_GAP * (0.7 + 0.6 * Math.random());
     }
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
-    const rideT = Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
+    // ride height is TERRAIN-RELATIVE (identical on flat ground where gY=0): with an
+    // absolute target the body steadicams over bumps at constant world height and the
+    // terrain reads as inert — legs silently absorb everything (measured: body y
+    // flat to 3 decimals across ±0.12 bumps). RIDE_TAU eases the transitions.
+    const gY = groundY(body.position.x, body.position.z);
+    const rideT = gY + Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
       rig.palmDepth + C.BELLY_CLEAR);
     s.rideH += (rideT - s.rideH) * (1 - Math.exp(-dt / C.RIDE_TAU)); // eased — no stop-pop
     // gesture height rides OUTSIDE the ease: RIDE_TAU smears a snappy shrug flat;
@@ -476,9 +482,9 @@ function makeSim(rig, calib) {
     // hover: direct Y from the lift track, no ballistic fall — the capped-force
     // stance spring can't produce a clean full liftoff (planted is already 0 while
     // hovering, so N/traction above are already no-ops; this replaces the integrator)
-    if (hovering()) { body.position.y = calib.standH + gesturePose().lift; s.vy = 0; }
+    if (hovering()) { body.position.y = gY + calib.standH + gesturePose().lift; s.vy = 0; }
     else body.position.y += s.vy * dt;
-    if (s.airborne && s.vy <= 0 && body.position.y <= calib.standH) {
+    if (s.airborne && s.vy <= 0 && body.position.y <= gY + calib.standH) {
       s.airborne = false; s.vy *= 0.1;                       // touchdown; springs absorb the rest
       applyBodyPose(); reseedFeet();
     }
