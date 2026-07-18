@@ -1,120 +1,87 @@
-# Handoff — User Feedback Round: Auto-Pivot, Sprint Speed, Procedural Terrain
+# Handoff — Diorama Room, Gemini Voice, Idle Life
 
-**Date:** 2026-07-17
+**Date:** 2026-07-18
 **Project:** hand-walker (`/Users/joshtaylor/CodingProjects/hand-walker`)
 
 ## Current Task
-Live user testing of the pivot/hover/run/obstacle round surfaced 3 real issues (1
-was a stale-tab false alarm); all fixed and gated. Next: another live pass —
-particularly whether the reversal fix and terrain read right by eye/feel, not just
-by probe numbers.
+Thing is now a diorama pet: fixed camera looking into his room, Gemini British-
+butler voice, room-aware voice commands, and a two-layer idle life (micro-idles +
+autonomous behaviors: wandering, napping, looking about). All gated and committed.
+Next: live user pass on the whole experience — voice sound, room feel, behavior
+pacing (BEHAVE_AFTER/GAP), whether idle life reads charming or fidgety.
 
-## Completed (this session, 2 commits on top of the pivot/hover/run/obstacle round)
-- **Auto-pivot on large course changes**: user reported "turn around and walk back"
-  took a slow arc. Root cause was in the EXECUTOR, not the pivot itself — the LLM
-  planned the reversal as a single `walk` to a point behind the hand, which steers
-  via the walking arc (pivot only ever engages for an explicit `turn` action).
-  `brain.js`'s `walk` action now checks target bearing vs heading; if >1 rad it
-  brakes to stance, pivots to face it, then walks — one pivot max per action.
-  Verified with the user's exact scenario (`forward:3` then `forward:-3`): hand
-  returns to exactly (0,0), pivot fires mid-plan.
-- **Sprint speed**: user couldn't tell run from walk. `V_MAX` 2.6→3.4 (the leash
-  cap only — QA's `runFast` commands 2.5 explicitly and is untouched); SYSTEM
-  prompt's top speed tier raised to 3-3.4. Verified: 3.4 u/s reaches cleanly (not
-  towed, stance err 0.0335, trot-family), LLM requests 3.4 for "sprint as fast as
-  you can" and gait reaches `run`.
-- **thumbsUp/thumbsDown "flipped" — investigated, no code change.** Numerically
-  re-verified the committed defs: thumbsUp's thumb tip is the highest point of any
-  digit, thumbsDown's the lowest. This matches last session's screenshot-verified
-  fix. Most likely explanation: the user's open tab predated that mid-session sign
-  correction — ES modules don't hot-reload, so a stale tab keeps running the old
-  code until refreshed. **If still backwards after a hard reload, the roll-track
-  signs in `thumbsUp`/`thumbsDown` need swapping — check live, don't assume.**
-- **Procedural low-poly bumpy terrain**: two-octave deterministic value-noise
-  heightfield (`OCTAVES` in terrain.js), flat-shaded low-poly mesh + height-tinted
-  vertex colors + wide grazing-angle key light + reduced IBL in scene.js. `groundY`
-  plane-interpolates over the EXACT triangulation the mesh renders (shared
-  cell/diagonal) — feet stand on the visible facets, not an approximation.
-  `flatMask` keeps the spawn disc and the +x QA corridor flat (qa.js's forward
-  scenarios sweep 10+ units on that lane). Obstacle box unchanged, still inside
-  the flat disc.
+## Completed (this session, 4 commits)
+- **Gemini TTS voice** (55a0175): `/tts` proxy → `gemini-3.1-flash-tts-preview`;
+  browser decodes s16 LITTLE-endian PCM (the `audio/l16` mime lies — verified by
+  waveform-smoothness A/B) into an AudioContext. Persona = voice `Charon` +
+  `TTS_STYLE` British-butler directive (both constants atop brain.js's speak
+  section). Fallback to speechSynthesis on error, visibly.
+- **Diorama room + fixed camera** (c9abc74): camera fixed at (7.8,5.4,9.4);
+  orbit is debug-only (backtick). Room: floor slab + west/north walls + doorway,
+  open toward the viewer; step = furniture; bumpy terrain beyond. Walls VISUAL
+  ONLY — no sim collision (QA corridor safe); the brain clamps every walk target
+  to the room interior instead (`clampRoom`, ROOM=4.8). New `walkTo{x,z}` world
+  action; SYSTEM prompt has the room map with named spots AND stable screen
+  directions ("screen-right = +x,-z") — the fixed camera's real payoff.
+  snap.mjs gained a `live` view (shoots the app's own camera).
+- **Idle life** (19a83f0): micro-idles stretch/peek/scratch + a 16 s `sleep`
+  gesture (settle + visible breathing; user-invokable "take a nap"). Brain-level
+  BEHAVIORS (wandering / looking about / napping in the back corner / fidgeting /
+  visiting the step) run through the same executor as voice commands, fire after
+  30 s user-quiet + 12 s sim-quiet, show as `idling <name>`, cancel instantly on
+  ask(). `brain.behave(name)` is the test hook.
 
 ## Hard-won findings (do not re-derive)
-- **Ride height was WORLD-ABSOLUTE, making terrain invisible to the walker even
-  once it was visible to the camera.** `rideT` (main.js) targeted `calib.standH`
-  regardless of local ground height — the body steadicams at constant world Y over
-  bumps while legs silently absorb everything (measured: body Y flat to 3 decimals
-  crossing ±0.12u bumps, before the fix). Fixed by adding `groundY(bodyX,bodyZ)` to
-  `rideT`, the hover-Y override, and the airborne landing-check threshold — all
-  three needed it, missing any one leaves a seam. RIDE_TAU still eases it.
-- **The §7 slope trap is a DISPLAY problem, not a geometry problem — solved with
-  display tools.** Flat shading alone (single octave, no color) was too subtle to
-  read in a screenshot even though the walkability math was already fine. What
-  actually worked, in order of impact: height-tinted vertex colors (smoothstepped
-  to use LOCAL contrast, not just global min/max), a wider/lower-angle key light
-  for long grazing shadows across the whole field (not just the spawn disc), a
-  second shorter-wavelength noise octave (relief FREQUENCY, same per-facet slope
-  budget), and — biggest single jump — cutting `scene.environmentIntensity` from
-  the default full IBL to 0.45 (ambient light was flatly filling every shadow the
-  other three techniques were trying to create).
-- **Executor-level auto-pivot beats prompt-tuning for "why didn't it turn fast."**
-  The SYSTEM prompt already told the LLM the `turn` action pivots — the actual gap
-  was that a *reversal* naturally gets planned as `walk` with a negative/behind
-  target, a plan shape the prompt never told the LLM maps to a large bearing
-  change. Fixing it in the executor (bearing-check + auto-pivot inside the `walk`
-  action) covers every plan shape the LLM might produce, not just ones that
-  happen to phrase the turn explicitly.
-- **Puppeteer/Chrome crashed mid-QA-run once this session** (`CallbackRegistry`
-  stack trace, no JS-level error) — a plain infra flake, not a code signal. One
-  retry at normal `uptime` load returned the clean baseline. Don't debug code for
-  a gate run that shows a raw Node/puppeteer stack trace instead of scenario
-  output — just re-run it.
+- **Autonomous layers must gate on SIM quiet, not just user quiet**: qa-gate
+  drives the sim without ever calling ask(), so a user-quiet-only condition
+  started behaviors mid-QA-settle (caught before the contaminated run finished,
+  gate killed + re-run). `BEHAVE_SIM_QUIET` 12 s > QA's ~5 s max quiet stretch.
+  Same class as IDLE_AFTER>rest, one level up. Every future autonomous trigger
+  needs this.
+- **Per-tick timeouts freeze their budget at action start**: walkTo's timeout
+  recomputed from remaining distance shrank while elapsed grew — long slow walks
+  died at ~9 s (broke napping). Compute once from initial distance.
+- **Normalize LLM plan slips in the executor**: Gemini emitted `{do:'sleep'}`
+  (gesture-as-action). run() rewrites any `do` naming a gesture into
+  `{do:'gesture',name}` — heals the class for all 14 gestures.
+- Gemini TTS PCM is little-endian s16 despite the `audio/l16` label (RFC says
+  big) — decided by decoding a real sample both ways (mean|Δ| 568 vs 14122).
 
-## Verification recipes (unchanged, still canonical)
+## Verification recipes (canonical)
 - Paused deterministic stepping at dt 0.00625 via probe.mjs; sample every 4th step.
-- Mid-gesture/mid-motion screenshots: snap.mjs with a ready-wait + paused stepping.
+- `snap.mjs --views live` for the diorama camera; other views reposition as before.
+- `brain.behave('<name>')` to force one behavior; `brain.ask('<text>')` for the
+  full voice-free loop.
 - Gates: `npm run test:unit`, `node scripts/calib-gate.mjs`,
-  `node scripts/qa-gate.mjs --repeat 2` (~200 s backgrounded; 7/9 with
-  turnCycle ~6.9 and gaitShift ~0.55 red is THE baseline). Check `uptime` before
-  trusting a slow/anomalous gate run — see machine-load corruption signature in
-  project memory (hand-walker-gotchas.md).
+  `node scripts/qa-gate.mjs --repeat 2` (~200 s backgrounded; 7/9 with turnCycle
+  ~6.9 + gaitShift ~0.55 red = THE baseline; rest slide must be exactly 0 — it's
+  the canary for idle/behavior leakage into the gate). Check `uptime` first.
 
 ## Pending
-1. **Live user re-verification**: does the reversal actually feel snappy now? Does
-   the terrain read as bumpy in normal play (not just in a screenshot)? Is 3.4 u/s
-   sprint visually distinct enough, or does it need to go higher still?
-2. §4.9 separation on SWING LANDINGS only (plumbing ready, unchanged for many sessions).
-3. turnCycle (continuous walk-and-turn) is still the one accepted-red QA scenario —
-   deliberately untouched; a true fix needs routing large in-motion heading errors
-   through the pivot path, not dialing YAW_RATE_MAX further.
-4. More/varied obstacles once the single step + bump field are user-validated.
+1. **Live user pass**: voice sound (swap `TTS_VOICE`/`TTS_STYLE` in brain.js if
+   Charon isn't right; try Puck/Fenrir/Enceladus/Iapetus), behavior pacing
+   (BEHAVE_AFTER/BEHAVE_GAP in tuning.js), room look, terrain readability.
+2. Room props beyond the step (a rug, a low table to hide under?) — visual only,
+   same pattern as walls.
+3. §4.9 separation on swing landings; turnCycle continuous-turn (both unchanged,
+   long-standing).
+4. Possible: behaviors that use the doorway (peek out, half-exit) — needs a
+   deliberate exception to the room clamp.
 
 ## Relevant Files
 | File | Notes |
 |------|-------|
-| `src/brain.js` | walk action auto-pivot logic; speed tiers; turn timeout |
-| `src/tuning.js` | V_MAX 3.4 |
-| `src/terrain.js` | OCTAVES, flatMask, vertexH/groundY (shared triangulation) |
-| `src/scene.js` | low-poly mesh from vertexH, vertex-color tinting, light/IBL tuning |
-| `main.js` | rideT/hover-Y/landing-check all terrain-relative now |
-| `src/gestures.js` | thumbsUp/thumbsDown defs — re-check live if user reports flipped again |
-
-## Voice (added 2026-07-18)
-- Gemini TTS (`gemini-3.1-flash-tts-preview`) via `POST /tts` in serve.py; browser
-  decodes raw s16 **little-endian** PCM (the `audio/l16` mime lies — verified by
-  waveform-smoothness comparison, 568 vs 14122 mean|Δ|) into an AudioContext.
-- Persona = `TTS_VOICE ('Charon')` + `TTS_STYLE` (British-butler style directive)
-  at the top of brain.js's speak section — the two dials for changing how he
-  sounds. Errors surface in the status bar then fall back to speechSynthesis.
-- User has NOT yet judged the actual sound — voice choice may need iteration
-  (other male-leaning prebuilts to try: Puck, Fenrir, Enceladus, Iapetus).
+| `src/brain.js` | executor+behaviors+clampRoom+walkTo; SYSTEM prompt (room map, directions); TTS speak() |
+| `src/gestures.js` | 14 gestures (incl. sleep) + 6 micro-idles |
+| `src/scene.js` | room geometry, fixed camera, terrain mesh, lighting |
+| `src/terrain.js` | two-octave noise + flatMask (room square + QA corridor) |
+| `src/tuning.js` | BEHAVE_AFTER/GAP/SIM_QUIET, IDLE_*, PIVOT_*, V_MAX |
+| `scripts/serve.py` | /llm + /tts proxies (GEMINI_API_KEY at launch) |
+| `scripts/snap.mjs` | views incl. 'live' |
 
 ## Context & Warnings
-- Dev server needs `GEMINI_API_KEY` in env (`source ~/.zshrc` first); `/llm` and
-  `/tts` 503 visibly without it. Models: gemini-2.5-flash for planning (3.5-flash
-  leaks thinking text), gemini-3.1-flash-tts-preview for voice.
-- Verify HEADLESS only; check `uptime` before trusting any qa-gate numbers.
-- ES modules don't hot-reload — a live browser tab can run stale code indefinitely;
-  when a user reports a visual bug already fixed in source, ask for a hard reload
-  before re-investigating.
+- Dev server needs `GEMINI_API_KEY` (`source ~/.zshrc` before launch); `/llm` and
+  `/tts` 503 visibly without it. Planning: gemini-2.5-flash. TTS:
+  gemini-3.1-flash-tts-preview.
+- Verify HEADLESS only; ES modules don't hot-reload (stale-tab reports).
 - Commits: `--no-verify`, no Co-Authored-By, one commit per verified milestone.
