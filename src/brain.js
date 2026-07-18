@@ -30,6 +30,10 @@ function parseFirstJSON(text) {
 export function makeBrain(sim, rig, camera) {
   const body = rig.mount;
   const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null };
+  // walls are visual-only in the sim; the brain is the only control path, so every
+  // walk target clamps to the room interior and Thing simply never leaves
+  const ROOM = 4.8;
+  const clampRoom = (p) => ({ x: M.clamp(p.x, -ROOM, ROOM), z: M.clamp(p.z, -ROOM, ROOM) });
   const setStatus = (status, detail = '') => {
     st.status = status; st.detail = detail;
     if (st.onstatus) st.onstatus(st);
@@ -59,10 +63,10 @@ export function makeBrain(sim, rig, camera) {
     walk(a) {
       if (!a.target) {                                   // hand frame → world, once
         const h = sim.s.heading, f = a.forward ?? 0, r = a.right ?? 0;
-        a.target = {
+        a.target = clampRoom({
           x: body.position.x + f * Math.cos(h) + r * Math.sin(h),
           z: body.position.z - f * Math.sin(h) + r * Math.cos(h),
-        };
+        });
       }
       const dx = a.target.x - body.position.x, dz = a.target.z - body.position.z;
       const d = Math.hypot(dx, dz);
@@ -84,6 +88,10 @@ export function makeBrain(sim, rig, camera) {
       sim.autoWalk(dx / d * v, dz / d * v);
       return RUNNING;
     },
+    walkTo(a, dt) {                                      // world-coordinate variant — the
+      if (!a.target) a.target = clampRoom({ x: a.x ?? 0, z: a.z ?? 0 });  // room map speaks
+      return ACTIONS.walk(a, dt);                        // in these; reuses walk wholesale
+    },
     turn(a) {                                            // pivot-in-place, zero translation
       if (!a.started) {
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
@@ -98,6 +106,7 @@ export function makeBrain(sim, rig, camera) {
     jump: () => 5,
     gesture: () => 8,
     walk: (a) => 6 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // +2s: possible lead-in pivot
+    walkTo: (a) => 6 + 2 * Math.hypot((a.x ?? 0) - body.position.x, (a.z ?? 0) - body.position.z),
     turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
   };
 
@@ -132,12 +141,15 @@ export function makeBrain(sim, rig, camera) {
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
 - {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted)
-- {"do":"walk","forward":F,"right":R,"speed":S} — walk to an offset in YOUR body frame; negative allowed. You end up facing your direction of travel. Units: world units, your body is ~2 long; typical distances 1-6. "speed" (u/s) sets your pace: ~0.8 (default, relaxed) for a normal walk, ~1.6 for a jog/trot, ~3-3.4 for a FULL SPRINT — use a higher speed whenever told to hurry, run, or race, or when the situation is urgent/excited.
+- {"do":"walkTo","x":X,"z":Z,"speed":S} — walk to a WORLD position in your room (preferred for going places). "speed" (u/s): ~0.8 relaxed default, ~1.6 jog, ~3-3.4 FULL SPRINT — sprint when told to hurry/run/race or when excited.
+- {"do":"walk","forward":F,"right":R,"speed":S} — walk a relative offset in YOUR body frame (for "back up a bit", "come closer"); negative allowed. You end up facing your travel direction.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
 - {"do":"jump"}
 - {"do":"wait","s":S}
 Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT — you speak in a dry, warm, upper-class British gentleman's voice, so phrase accordingly ("Right then", "I should think so", "Terribly sorry"). Only use say when a gesture cannot carry the answer.
-Each message starts with [state: ...] — your position, heading, and where the user watches from (their camera). "Come here" = walk toward the user, stop ~1.5 units short, then beckon or wave.
+YOUR ROOM (a diorama the user looks into from a FIXED camera): floor spans x,z from -5 to 5. Solid walls on the west (-x) and north (-z) sides; the north wall has a doorway at (0,-4.5). The south/east sides are open, facing the viewer. Named spots: center (0,0); the little step (0, 2.4) — you can climb on it; back corner (-4,-4); doorway (0,-4.2); front-right corner (4,4) — nearest the viewer.
+SCREEN DIRECTIONS (camera never moves): screen-right = toward +x,-z; screen-left = toward -x,+z; toward the viewer = +x,+z; away = -x,-z. Use these when the user says left/right/closer/back.
+Each message starts with [state: ...] — your position and heading. "Come here" = walkTo near (3.5, 3.5) (the open front), then beckon or wave.
 Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk, say why briefly.`;
 
   const history = [];                                    // Gemini contents format

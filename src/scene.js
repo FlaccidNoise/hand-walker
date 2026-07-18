@@ -23,15 +23,19 @@ export function buildScene(container) {
   scene.environmentIntensity = 0.45;    // full IBL floods shadows + facet shading flat —
                                         // terrain relief at walkable slopes needs the contrast
 
-  const camera = new THREE.PerspectiveCamera(55, container.clientWidth / container.clientHeight, 0.01, 200);
-  camera.position.set(2.2, 1.6, 3.0);
+  // fixed diorama camera: we look INTO Thing's room; orbit is a debug-only tool
+  // (backtick re-enables it — see main.js)
+  const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.01, 200);
+  camera.position.set(7.8, 5.4, 9.4);
+  camera.lookAt(0, 0.45, 0);
 
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0.5, 0);
+  controls.target.set(0, 0.45, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
   controls.minDistance = 0.4;
   controls.maxDistance = 30;
+  controls.enabled = false;
   controls.update();
 
   // --- light rig ---
@@ -110,5 +114,29 @@ export function rebuildGround() {
     box.castShadow = true; box.receiveShadow = true;
     group.add(box);
   }
+
+  // Thing's room (diorama): floor tile + two back walls with a doorway, open
+  // toward the fixed camera (+x+z). Walls are VISUAL ONLY — no sim collision (QA's
+  // +x corridor runs "through" the east wall headlessly); the brain clamps every
+  // walk target to the room instead, and that's the only control path there is.
+  const R = 5.5, WALL_H = 2.4, T = 0.18;
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b3450, roughness: 0.9, flatShading: true });
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(2 * R, 0.04, 2 * R), floorMat);
+  floor.position.set(0, -0.018, 0);                          // top face at y≈0.002 over the flat ground
+  floor.receiveShadow = true;
+  group.add(floor);
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x333e5e, roughness: 0.92, flatShading: true });
+  const wall = (w, h, d, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+    m.position.set(x, y, z);
+    m.castShadow = true; m.receiveShadow = true;
+    group.add(m);
+  };
+  wall(T, WALL_H, 2 * R + T, -R - T / 2, WALL_H / 2, 0);     // west wall (back-left)
+  const DOOR_W = 1.6, DOOR_H = 1.7;                          // doorway in the north wall
+  const seg = (R - DOOR_W / 2);
+  wall(seg, WALL_H, T, -R + seg / 2, WALL_H / 2, -R - T / 2);
+  wall(seg, WALL_H, T, R - seg / 2, WALL_H / 2, -R - T / 2);
+  wall(DOOR_W, WALL_H - DOOR_H, T, 0, DOOR_H + (WALL_H - DOOR_H) / 2, -R - T / 2);  // lintel
   return { group, mesh };
 }

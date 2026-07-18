@@ -29,6 +29,7 @@ const VIEW_FNS = {
   front: (B, d) => ({ x: B.x + d, z: B.z }),
   tq:    (B, d) => ({ x: B.x + d * 0.7, z: B.z + d * 0.7, yExtra: 1.2 }),
   top:   (B, d) => ({ x: B.x + 0.01, z: B.z, top: true }),
+  live:  null,                        // don't touch the camera — the app's own view
 };
 
 function viewPosition(view, B, standH, d) {
@@ -43,7 +44,7 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const views = opts.views.split(',').map(s => s.trim()).filter(Boolean);
   for (const v of views) {
-    if (!VIEW_FNS[v]) {
+    if (!(v in VIEW_FNS)) {
       console.error(`unknown view "${v}" — valid views: ${Object.keys(VIEW_FNS).join(', ')}`);
       process.exit(1);
     }
@@ -76,16 +77,18 @@ async function main() {
       const standH = await page.evaluate(() => window.__hand.calib.standH);
       const pos = viewPosition(view, B, standH, 3.5);
 
-      // Re-apply the camera pose for several frames right before the shot, since
-      // the main loop lerps controls.target toward the body every frame.
-      for (let i = 0; i < 10; i++) {
-        await page.evaluate((p) => {
-          const { camera, controls } = window.__hand;
-          camera.position.set(p.camX, p.camY, p.camZ);
-          controls.target.set(p.tgtX, p.tgtY, p.tgtZ);
-          controls.update();
-        }, pos);
-        await new Promise(r => setTimeout(r, 16));
+      // Re-apply the camera pose for several frames right before the shot ('live'
+      // skips this and shoots the app's own fixed diorama camera).
+      if (pos) {
+        for (let i = 0; i < 10; i++) {
+          await page.evaluate((p) => {
+            const { camera, controls } = window.__hand;
+            camera.position.set(p.camX, p.camY, p.camZ);
+            controls.target.set(p.tgtX, p.tgtY, p.tgtZ);
+            controls.update();
+          }, pos);
+          await new Promise(r => setTimeout(r, 16));
+        }
       }
       await new Promise(r => setTimeout(r, 150));
 

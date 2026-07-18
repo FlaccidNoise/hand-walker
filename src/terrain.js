@@ -42,12 +42,13 @@ function vnoise(x, z, wavelen, salt) {  // smoothstep-interpolated value noise, 
   return (a + (b - a) * sx) * (1 - sz) + (c + (d - c) * sx) * sz;
 }
 
-// 0 over the spawn disc (r 5) and the +x QA corridor (|z|<2.2, -1<x<16+margin),
-// ramping to 1 over ~3u beyond them
+// 0 over the room square (±5.5 + walls), the spawn disc, and the +x QA corridor
+// (|z|<2.2, -1<x<16+margin), ramping to 1 over ~3u beyond them
 function flatMask(x, z) {
+  const dRoom = Math.max(Math.abs(x) - 6, Math.abs(z) - 6);
   const dDisc = Math.hypot(x, z) - 5;
   const dCorr = Math.max(Math.abs(z) - 2.2, -x - 1, x - 17);
-  const d = Math.min(dDisc, dCorr);
+  const d = Math.min(dRoom, dDisc, dCorr);
   if (d <= 0) return 0;
   if (d >= 3) return 1;
   const t = d / 3;

@@ -63,7 +63,7 @@ async function init() {
   // keyboard: dev keys only — direct control removed, the brain drives (Phase A)
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; }
+    if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
     if (k === 'p') state.paused = !state.paused;
     if (k === 'r') { brain.stop(); sim.reset(); }
   });
@@ -105,9 +105,7 @@ async function init() {
     });
   }
 
-  controls.target.set(0, calib.standH, 0);
-  camera.position.set(1.4, 0.9 + calib.standH, 2.6);
-  controls.update();
+  // camera is the fixed diorama view set in buildScene — nothing to do here
 
   const clock = new THREE.Clock();
   let frames = 0, fpsT = 0;
@@ -118,9 +116,7 @@ async function init() {
       sim.step(dt * C.TIME_SCALE);                           // TIME_SCALE slows the clock (§4.8)
       brain.tick(dt * C.TIME_SCALE);
     }
-    controls.target.lerp(new THREE.Vector3(
-      rig.mount.position.x, calib.standH, rig.mount.position.z), 0.08);
-    controls.update();
+    if (controls.enabled) controls.update();                 // fixed diorama camera; orbit is debug-only
     renderer.render(scene, camera);
     if (state.debug) drawDebug(dbg, rig, sim);
     frames++; fpsT += dt;
