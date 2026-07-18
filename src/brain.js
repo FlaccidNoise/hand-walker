@@ -136,7 +136,7 @@ Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
 - {"do":"jump"}
 - {"do":"wait","s":S}
-Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT (tiny robot voice) — only when a gesture cannot carry the answer.
+Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT — you speak in a dry, warm, upper-class British gentleman's voice, so phrase accordingly ("Right then", "I should think so", "Terribly sorry"). Only use say when a gesture cannot carry the answer.
 Each message starts with [state: ...] — your position, heading, and where the user watches from (their camera). "Come here" = walk toward the user, stop ~1.5 units short, then beckon or wave.
 Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk, say why briefly.`;
 
@@ -177,15 +177,48 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     history.push({ role: 'model', parts: [{ text: JSON.stringify(reply) }] });
     if (reply.say) {
       setStatus('saying', reply.say);
-      if (typeof speechSynthesis !== 'undefined') {
-        const u = new SpeechSynthesisUtterance(reply.say);
-        u.pitch = 1.6; u.rate = 1.15;                    // tiny robot voice
-        speechSynthesis.speak(u);
-      }
+      speak(reply.say);                                  // fire-and-forget: plan runs meanwhile
     }
     if (Array.isArray(reply.plan) && reply.plan.length) run(reply.plan.slice(0, 20));
     else if (!reply.say) setStatus('error', 'brain returned no plan and nothing to say');
     return reply;
   }
-  return { st, run, stop, tick, ask };
+
+  // ---- voice: Gemini TTS via the /tts proxy (raw s16 little-endian PCM — mime
+  // says l16 which is officially big-endian, but decoded-both-ways smoothness
+  // analysis says little: mean|Δ| 568 vs 14122). Style + voice are the persona.
+  const TTS_VOICE = 'Charon';
+  const TTS_STYLE = 'Say in a warm, dry, upper-class British male accent, like a tiny distinguished butler: ';
+  let audioCtx = null;
+  async function speak(text) {
+    try {
+      const res = await fetch('/tts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: TTS_STYLE + text, voice: TTS_VOICE }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      audioCtx = audioCtx || new AudioContext();
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      const rate = +(/rate=(\d+)/.exec(data.mime)?.[1] ?? 24000);
+      const bin = atob(data.audio);
+      const n = bin.length >> 1;
+      const buf = audioCtx.createBuffer(1, n, rate);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) {
+        const v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+        ch[i] = (v >= 32768 ? v - 65536 : v) / 32768;
+      }
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf; src.connect(audioCtx.destination); src.start();
+    } catch (e) {
+      setStatus('error', `voice: ${String(e.message || e)}`);   // visible, then degrade
+      if (typeof speechSynthesis !== 'undefined') {
+        const u = new SpeechSynthesisUtterance(text);
+        u.pitch = 1.6; u.rate = 1.15;
+        speechSynthesis.speak(u);
+      }
+    }
+  }
+  return { st, run, stop, tick, ask, speak };
 }

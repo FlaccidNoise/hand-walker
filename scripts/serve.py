@@ -11,6 +11,7 @@ GEMINI_KEY = os.environ.get('GEMINI_API_KEY', '')
 # even with thinkingBudget:0 (verified 2026-07-16, nondeterministic ~1/3 of replies).
 # 2.5-flash is a non-reasoning model — clean JSON in 5/5 manual trials.
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.5-flash')
+GEMINI_TTS_MODEL = os.environ.get('GEMINI_TTS_MODEL', 'gemini-3.1-flash-tts-preview')
 
 class H(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
@@ -28,13 +29,32 @@ class H(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _gemini(self, model, payload):
+        url = (f'https://generativelanguage.googleapis.com/v1beta/models/'
+               f'{model}:generateContent?key={GEMINI_KEY}')
+        r = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                   headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(r, timeout=25) as resp:
+            return json.load(resp)
+
     def do_POST(self):
-        if self.path != '/llm':
-            return self._json(404, {'error': 'unknown endpoint (only POST /llm)'})
+        if self.path not in ('/llm', '/tts'):
+            return self._json(404, {'error': 'unknown endpoint (POST /llm or /tts)'})
         if not GEMINI_KEY:
             return self._json(503, {'error': 'GEMINI_API_KEY not set in the server environment — restart serve.py from a shell with the key (source ~/.zshrc)'})
         try:
             req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            if self.path == '/tts':
+                out = self._gemini(GEMINI_TTS_MODEL, {
+                    'contents': [{'parts': [{'text': req['text']}]}],
+                    'generationConfig': {
+                        'responseModalities': ['AUDIO'],
+                        'speechConfig': {'voiceConfig': {'prebuiltVoiceConfig': {
+                            'voiceName': req.get('voice', 'Charon')}}},
+                    },
+                })
+                d = out['candidates'][0]['content']['parts'][0]['inlineData']
+                return self._json(200, {'audio': d['data'], 'mime': d['mimeType']})
             payload = {
                 'systemInstruction': {'parts': [{'text': req['system']}]},
                 'contents': req['contents'],
@@ -44,12 +64,7 @@ class H(http.server.SimpleHTTPRequestHandler):
                     'thinkingConfig': {'thinkingBudget': 0},
                 },
             }
-            url = (f'https://generativelanguage.googleapis.com/v1beta/models/'
-                   f'{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}')
-            r = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                       headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(r, timeout=25) as resp:
-                out = json.load(resp)
+            out = self._gemini(GEMINI_MODEL, payload)
             text = out['candidates'][0]['content']['parts'][0]['text']
             self._json(200, {'text': text})
         except urllib.error.HTTPError as e:
