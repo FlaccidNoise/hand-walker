@@ -1,7 +1,7 @@
 # Handoff — Diorama Room, Gemini Voice, Idle Life
 
 **Date:** 2026-07-18
-**Project:** hand-walker (`/Users/joshtaylor/CodingProjects/hand-walker`)
+**Project:** hand-walker (`~/CodingProjects/hand-walker`)
 
 ## Current Task
 Thing is now a diorama pet: fixed camera looking into his room, Gemini British-
