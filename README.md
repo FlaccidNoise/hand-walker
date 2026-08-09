@@ -72,4 +72,4 @@ design document rather than a description of the current tree.
 
 ## License
 
-No license file yet — all rights reserved by default. Add one before reusing.
+MIT — see [LICENSE](LICENSE).
