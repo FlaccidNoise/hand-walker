@@ -8,8 +8,7 @@
     "serve": "python3 -m http.server 8741",
     "test:unit": "node --test test/unit.test.mjs",
     "test:calib": "node scripts/calib-gate.mjs",
-    "test": "node scripts/qa-gate.mjs",
-    "build": "python3 scripts/build-artifact.py"
+    "test": "node scripts/qa-gate.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",
