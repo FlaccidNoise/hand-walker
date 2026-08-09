@@ -64,11 +64,19 @@ scripts/        headless test gates
 docs/           REBUILD-SPEC.md describes the intended architecture
 ```
 
+## Related: procedural-hand-animation
+
+[procedural-hand-animation](https://github.com/FlaccidNoise/procedural-hand-animation)
+is the sibling of this project — the same premise explored down a different
+path, with a heavier voice/buddy layer and a single-file artifact build. This
+repo is the leaner take. Neither supersedes the other.
+
 ## Note on `docs/REBUILD-SPEC.md`
 
 The spec describes a `scripts/build-artifact.py` that bundles everything into a
-single self-contained HTML file. That script was never written, so the spec is a
-design document rather than a description of the current tree.
+single self-contained HTML file. That script does not exist in this repo — the
+sibling project above is where it lives. Treat the spec as a design document
+rather than a description of this tree.
 
 ## License
 
