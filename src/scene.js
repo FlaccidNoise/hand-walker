@@ -52,7 +52,8 @@ export function buildScene(container) {
   key.shadow.camera.near = 0.5; key.shadow.camera.far = 25;
   key.shadow.bias = -0.0004;
   scene.add(key);
-  scene.add(new THREE.AmbientLight(0x404858, 0.4));
+  const amb = new THREE.AmbientLight(0x404858, 0.4);
+  scene.add(amb);
 
   const ground = rebuildGround();
   scene.add(ground.group);
@@ -64,7 +65,7 @@ export function buildScene(container) {
   };
   window.addEventListener('resize', onResize);
 
-  return { renderer, scene, camera, controls, ground, pmrem, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
+  return { renderer, scene, camera, controls, ground, pmrem, lights: { hemi, key, amb }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
 }
 
 // ground: low-poly terrain mesh built by sampling terrain.js's vertexH on the SAME

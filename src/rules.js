@@ -18,6 +18,10 @@ const GESTURES = [
   [/\b(thumbs? up|good job|well done|nice one|great)\b/, 'thumbsUp'],
   [/\b(thumbs? down|boo)\b/, 'thumbsDown'],
   [/\b(middle finger|the bird|flip (me )?off)\b/, 'flipBird'],
+  [/\b(peace|victory)\b/, 'peace'],
+  [/\b(rock on|horns|metal)\b/, 'horns'],
+  [/\b(finger gun|pew)\b/, 'fingerGun'],
+  [/\bhigh five\b/, 'highFive'],
   [/\b(wave|hello|hi|hey|goodbye|bye)\b/, 'wave'],
   [/\b(nod|say yes)\b/, 'yes'],
   [/\b(shake|say no)\b/, 'no'],
@@ -34,7 +38,12 @@ const clamp = (v) => Math.max(-C.ROOM.half, Math.min(C.ROOM.half, v));
 function clause(t, pos) {
   if (/\b(don'?t|do not|never)\b/.test(t)) return null;      // do not invert a negation by keyword
   if (/\b(stop|halt|stay|freeze|whoa|hold still)\b/.test(t)) return [];
-  if (/\b(sleep|nap|rest|go to bed)\b/.test(t)) return [{ do: 'walkTo', x: -3.5, z: -3.5, speed: 0.6 }, { do: 'gesture', name: 'sleep' }];
+  if (/\b(sleep|nap|rest|go to bed|rug)\b/.test(t)) return [{ do: 'use', target: 'rug' }];
+  if (/\b(lights?|switch|dark|bright)\b/.test(t)) return [{ do: 'use', target: 'switch' }];
+  if (/\b(bell|ring|ding)\b/.test(t)) return [{ do: 'use', target: 'bell' }];
+  if (/\b(ball|kick|play)\b/.test(t)) return [{ do: 'use', target: 'ball' }];
+  if (/\bdouble snap\b/.test(t)) return [{ do: 'gesture', name: 'doubleSnap' }];
+  if (/\b(snap|click your fingers)\b/.test(t)) return [{ do: 'gesture', name: 'snap' }];
   for (const [re, name] of GESTURES) if (re.test(t)) return [{ do: 'gesture', name }];
   if (/\b(jump|hop|leap|bounce)\b/.test(t)) return [{ do: 'jump' }];
   if (/\b(turn|face|rotate|spin)\b/.test(t)) {

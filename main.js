@@ -8,6 +8,7 @@ import { groundY } from './src/terrain.js';
 import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
 import { makeBrain } from './src/brain.js';
 import { initInput } from './src/input.js';
+import { makeProps, SOUNDS } from './src/props.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import { digitRatio, strideBudget, digitDuty } from './src/gait.js';
@@ -26,7 +27,7 @@ const state = {
 };
 
 async function init() {
-  const { renderer, scene, camera, controls } = buildScene(app);
+  const { renderer, scene, camera, controls, lights } = buildScene(app);
   const dbg = new DebugDraw(scene);
   dbg.visible = false;
 
@@ -49,10 +50,13 @@ async function init() {
 
   const sim = makeSim(rig, calib);
   sim.reset();
-  const brain = makeBrain(sim, rig, camera);
+  const props = makeProps({ scene, lights });
+  const brain = makeBrain(sim, rig, camera, props);
+  // gesture cues: sounds, and the double snap that works any `remote` prop from afar
+  sim.onCue = (name) => { if (name === 'remote') props.fire('switch'); else if (SOUNDS[name]) SOUNDS[name](); };
 
   const __hand = {
-    rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES,
+    rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES, props,
     solveLeg, resetToBind, tipLocal, groundY, state, calib, sim, brain,
     reset: (...a) => { brain.stop(); sim.reset(...a); },
     autoWalk: (x, z) => sim.autoWalk(x, z),
@@ -63,7 +67,7 @@ async function init() {
   };
   window.__hand = __hand;
 
-  const input = initInput({ renderer, camera, controls, scene, rig, brain });
+  const input = initInput({ renderer, camera, controls, scene, rig, brain, props });
 
   // dev keys (movement, emotes and clicks live in src/input.js)
   addEventListener('keydown', (e) => {
@@ -130,6 +134,9 @@ async function init() {
       while (acc >= C.SIM_DT - 1e-9 && n++ < C.SIM_MAX_SUBSTEPS) {  // ε: a 120 Hz frame is one step, not 0-then-2
         sim.step(C.SIM_DT);
         brain.tick(C.SIM_DT);
+        const B = rig.mount.position, landed = sim.s.landed;
+        sim.s.landed = false;
+        props.update(C.SIM_DT, { x: B.x, y: B.y, z: B.z, vx: sim.s.v.x, vz: sim.s.v.z, airborne: sim.s.airborne }, landed);
         acc -= C.SIM_DT;
       }
       if (acc >= C.SIM_DT) acc = 0;                          // overloaded: drop time, never feed a long step
@@ -166,7 +173,7 @@ function makeSim(rig, calib) {
     v: new THREE.Vector3(), cmd: new THREE.Vector3(), cmdT: new THREE.Vector3(),
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', gaitT: 0, phase: 0, f: 0, vEff: 0, speed: 0, planted: 0,
-    airborne: false, replant: false, time: 0,
+    airborne: false, replant: false, landed: false, time: 0,
     spr: { pitch: { x: 0, v: 0 }, roll: { x: 0, v: 0 } },
     gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, turnWait: 0, hop: null, rng: 1,
   };
@@ -555,7 +562,13 @@ function makeSim(rig, calib) {
     if (s.gesture) {
       const wasHover = hovering();
       if (s.airborne || s.speed > C.V_MOVE) s.gesture = null;
-      else { s.gesture.t += dt; if (s.gesture.t >= s.gesture.dur) s.gesture = null; }
+      else {
+        const u0 = s.gesture.t / s.gesture.dur;
+        s.gesture.t += dt;
+        const u1 = s.gesture.t / s.gesture.dur;
+        for (const [u, name] of s.gesture.def.cue ?? []) if (u0 < u && u1 >= u && sim.onCue) sim.onCue(name);
+        if (s.gesture.t >= s.gesture.dur) s.gesture = null;
+      }
       // hover end: digits re-plant through real swings (the gesture-exit path in the
       // leg loop). The body is HELD at stance height until they are down — a reseed
       // snapped all five from fist to planted in one step (0.95-1.33 u)
@@ -618,6 +631,7 @@ function makeSim(rig, calib) {
     if (s.airborne && s.vy <= 0 && body.position.y <= gY + calib.standH) {
       s.airborne = false; s.vy *= C.LAND_KEEP;               // touchdown: the stance spring takes the rest (squash)
       if (s.hop) { s.heading = s.hop.to; s.hop = null; }
+      else s.landed = true;                                  // a real jump came down (props listen: the bell)
       applyBodyPose(); reseedFeet();
     }
     applyBodyPose();
@@ -773,7 +787,8 @@ function makeSim(rig, calib) {
     s.airborne = true;
   }
 
-  return { s, legs, step, reset, autoWalk, jump, bandAt, gesture, pivot };
+  const sim = { s, legs, step, reset, autoWalk, jump, bandAt, gesture, pivot, onCue: null };
+  return sim;
 }
 
 // --- calibrate() — §4.4 stance-band calibration, THE load-bearing scan. ---

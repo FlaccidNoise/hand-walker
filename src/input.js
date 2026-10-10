@@ -2,6 +2,7 @@
 // plan executor voice and idle behaviors use, so every input gets the same turn
 // policy, arrival and stop.
 //   click floor      walk there (near = strut, far = scuttle, double-click = sprint)
+//   click a prop     go and use it (light switch, bell, ball, rug)
 //   WASD / arrows    walk, camera-relative (hold Shift to scuttle); release = stop
 //   Q / E            pivot 45° left / right        Space  jump
 //   1-9, 0           emotes
@@ -12,11 +13,11 @@ const FAR = 2.5;                    // u — clicks further than this scuttle
 const DOUBLE_CLICK = 350;           // ms
 const CARROT = 1.5;                 // u — keys aim a walk target this far ahead
 const KEY_REFRESH = 0.1;            // s between carrot updates while a direction is held
-export const EMOTE_KEYS = ['wave', 'yes', 'no', 'idk', 'laugh', 'bow', 'point', 'beckon', 'thumbsUp', 'thinking'];
+export const EMOTE_KEYS = ['wave', 'yes', 'no', 'idk', 'laugh', 'bow', 'thumbsUp', 'peace', 'snap', 'doubleSnap'];
 const DIRS = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1],
   KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 
-export function initInput({ renderer, camera, controls, scene, rig, brain }) {
+export function initInput({ renderer, camera, controls, scene, rig, brain, props }) {
   const body = rig.mount.position, half = C.ROOM.half;
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), hit = new THREE.Vector3();
   const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -31,6 +32,8 @@ export function initInput({ renderer, camera, controls, scene, rig, brain }) {
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
+    const prop = props.pick(ray);                             // a click on a prop uses it
+    if (prop) { brain.command([{ do: 'use', target: prop }], { source: 'click' }); return; }
     if (!ray.ray.intersectPlane(floor, hit)) return;
     const x = THREE.MathUtils.clamp(hit.x, -half, half), z = THREE.MathUtils.clamp(hit.z, -half, half);
     const now = performance.now(), d = Math.hypot(x - body.x, z - body.z);

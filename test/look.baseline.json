@@ -333,14 +333,14 @@
   "cmdEnd": 4.51
  },
  "gestures": {
-  "slide": 0.006,
+  "slide": 0.015,
   "cross": -0.007,
   "floor": 0.079,
-  "tipErrP95": 0.015,
+  "tipErrP95": 0.014,
   "swingMin": null,
   "swingMax": null,
   "towed": false,
-  "steps": 33,
+  "steps": 63,
   "lift": null,
   "clear": {
    "thumb": 0.198,
@@ -352,11 +352,11 @@
   "aloftClear": null,
   "plantedMin": 0,
   "stepLen": {
-   "thumb": 0.326,
-   "index": 0.314,
-   "middle": 0.428,
-   "ring": 0.545,
-   "pinky": 0.479
+   "thumb": 0.331,
+   "index": 0.328,
+   "middle": 0.519,
+   "ring": 0.693,
+   "pinky": 0.473
   },
   "footfallsPerU": null,
   "slidePerU": null,

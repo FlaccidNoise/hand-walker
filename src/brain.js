@@ -30,7 +30,7 @@ function parseFirstJSON(text) {
   throw new Error('unterminated JSON object in reply');
 }
 
-export function makeBrain(sim, rig, camera) {
+export function makeBrain(sim, rig, camera, props = null) {
   const body = rig.mount;
   const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null };
   let bClock = 0;                                        // brain time, s sim
@@ -52,7 +52,9 @@ export function makeBrain(sim, rig, camera) {
     },
     jump(a) {
       if (!a.started) {
-        if (sim.s.airborne) return RUNNING;              // land a prior jump first
+        // land a prior jump first, and push off all five: jump energy scales with planted
+        // digits (a jump taken mid-step reached 1.68 u of the 2.32 it should)
+        if (sim.s.airborne || sim.s.planted < 5 || sim.s.speed > C.V_MOVE) return RUNNING;
         sim.jump(); a.started = true; return RUNNING;
       }
       return sim.s.airborne ? RUNNING : DONE;
@@ -98,6 +100,16 @@ export function makeBrain(sim, rig, camera) {
       }
       return ACTIONS.walk(a, dt);                        // reuses walk wholesale
     },
+    face(a) {                                            // turn to a WORLD heading (props have a front)
+      if (!a.started) {
+        if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;
+        const d = M.wrapAngle(a.heading - sim.s.heading);
+        if (Math.abs(d) < 0.06) return DONE;
+        if (sim.pivot(d * 180 / Math.PI)) a.started = true;
+        return RUNNING;
+      }
+      return sim.s.pivotTarget != null || sim.s.airborne ? RUNNING : DONE;
+    },
     turn(a) {                                            // pivot-in-place, zero translation
       if (!a.started) {
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
@@ -114,12 +126,25 @@ export function makeBrain(sim, rig, camera) {
     walk: (a) => 8 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // includes a lead-in pivot
     walkTo: (a) => a.tmo ?? 30,
     turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
+    face: () => 8,
   };
 
   function run(plan, tag = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
     plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
+    // {do:'use',target}: go to the prop's anchor, face it, then do what the prop asks for
+    let unknown = null;
+    plan = plan.flatMap(a => {
+      if (a.do !== 'use') return [a];
+      const p = props && props.get(a.target);
+      if (!p) { unknown = a.target; return []; }
+      const far = Math.hypot(p.anchor.x - body.position.x, p.anchor.z - body.position.z) > 2.5;
+      const go = [{ do: 'walkTo', x: p.anchor.x, z: p.anchor.z, speed: p.speed ?? (far ? C.SPEED.scuttle : C.SPEED.strut) }];
+      if (p.facing != null) go.push({ do: 'face', heading: p.facing });
+      return [...go, ...p.plan()];
+    });
+    if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
     st.i = 0;
@@ -217,6 +242,7 @@ Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
 - {"do":"jump"}
 - {"do":"wait","s":S}
+- {"do":"use","target":ID} — go to a thing in the room and use it (the state line lists them)
 Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT — you speak in a dry, warm, upper-class British gentleman's voice, so phrase accordingly ("Right then", "I should think so", "Terribly sorry"). Only use say when a gesture cannot carry the answer.
 YOUR ROOM (a diorama the user looks into from a FIXED camera): floor spans x,z from -${C.ROOM.half} to ${C.ROOM.half}. Solid walls on the west (-x) and north (-z) sides; the north wall has a doorway at (0,-4.5). The south/east sides are open, facing the viewer. Named spots: center (0,0); the little step (0, 2.4) — you can climb on it; back corner (-4,-4); doorway (0,-4.2); front-right corner (4,4) — nearest the viewer.
 SCREEN DIRECTIONS (camera never moves): screen-right = toward +x,-z; screen-left = toward -x,+z; toward the viewer = +x,+z; away = -x,-z. Use these when the user says left/right/closer/back.
@@ -233,7 +259,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       const rgt = dx * Math.sin(h) + dz * Math.cos(h);
       user = `; user at forward ${fwd.toFixed(1)}, right ${rgt.toFixed(1)}, dist ${Math.hypot(dx, dz).toFixed(1)}`;
     }
-    return `[state: pos (${p.x.toFixed(1)}, ${p.z.toFixed(1)}), heading ${(h * 180 / Math.PI).toFixed(0)}°${user}]`;
+    return `[state: pos (${p.x.toFixed(1)}, ${p.z.toFixed(1)}), heading ${(h * 180 / Math.PI).toFixed(0)}°${user}. ${props ? props.describe() : ''}]`;
   }
   let llmDown = false;                                   // set once /llm proves unreachable
   // run a rules plan. `noModel`: say so when there is no rule and no LLM to ask.

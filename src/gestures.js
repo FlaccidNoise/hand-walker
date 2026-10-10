@@ -63,9 +63,24 @@ const THUMB_TUCK = { yaw: 0, mcp: 0.25, pip: 1.4 };
 // The lift must clear a finger pointing straight down mid-unfurl: 0.22 was too low.
 const HOVER_WIN = [0, 0.7];
 const HOVER_LIFT = [[0, 0], [0.15, 0.45], [0.85, 0.45], [1, 0]];
+// hand signs: `extended` digits (one name or a list) hold `pose`, the rest make a fist
 const hoverDigits = (extended, pose = CURL, thumb = FIST) => Object.fromEntries(
   ['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
-    [f, { base: f === extended ? pose : f === 'thumb' ? thumb : FIST, win: HOVER_WIN }]));
+    [f, { base: [extended].flat().includes(f) ? pose : f === 'thumb' ? thumb : FIST, win: HOVER_WIN }]));
+// the on-edge presentation every sign shares: lift, roll thumb-up, hold, roll back, set down
+const SIGN_ROLL = [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]];
+const sign = (extended, thumb = THUMB_TUCK) => ({
+  dur: 1.8, hover: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL }, digits: hoverDigits(extended, CURL, thumb),
+});
+// finger snap: thumb and middle meet, the middle whips into the palm, and the sound
+// lands on that frame (`cue` = [gesture u, name], played by main.js). There is no
+// finger-to-thumb contact solver: timing and the click sell it.
+const snapDigits = (whips) => {
+  const d = hoverDigits(['thumb', 'middle'], { yaw: 0, mcp: 0.35, pip: 0.75 }, CURL);
+  d.thumb.base = { yaw: 0, mcp: 0.15, pip: 0.6 };
+  d.middle.mcp = whips.flatMap(u => [[u - 0.06, 0], [u, 0.95], [u + 0.14, 0.95], [u + 0.2, 0]]);
+  return d;
+};
 
 export const GESTURES = {
   yes: { dur: 1.1, body: { pitch: osc(2, 0.16) } },
@@ -156,6 +171,16 @@ export const GESTURES = {
     body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]] },
     digits: hoverDigits('middle', CURL, THUMB_TUCK),
   },
+  peace: sign(['index', 'middle']),
+  horns: sign(['index', 'pinky']),
+  fingerGun: sign(['index', 'thumb'], CURL),
+  highFive: sign(['thumb', 'index', 'middle', 'ring', 'pinky']),
+  // whip keys are in the digit window's own 0..1 (HOVER_WIN = 0.7 of the gesture)
+  snap: { dur: 1.4, hover: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
+    digits: snapDigits([0.62]), cue: [[0.62 * 0.7, 'snap']] },
+  // two snaps: Thing's remote. The second one works the light switch from anywhere.
+  doubleSnap: { dur: 1.8, hover: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
+    digits: snapDigits([0.5, 0.78]), cue: [[0.5 * 0.7, 'snap'], [0.78 * 0.7, 'snap'], [0.78 * 0.7, 'remote']] },
   // nap: settle low, pitch nose-down, curl slightly, and breathe slowly for the
   // whole hold — user-invokable ("take a nap") and the payoff of the 'nap' idle
   // behavior. Long dur is fine: any input cancels via the normal gesture path.

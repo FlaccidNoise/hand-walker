@@ -14,6 +14,7 @@ export const LOCAL_MODEL = { id: 'Qwen3-0.6B-q4f16_1-MLC', size: '340 MB' };
 const PLACES = { center: [0, 0], step: [0, 2.4], corner: [-4, -4], door: [0, -4.2], front: [3.5, 3.5] };
 const S = Math.SQRT1_2;
 const DIRS = { left: [-S, S], right: [S, -S], closer: [S, S], back: [-S, -S] };
+const THINGS = ['switch', 'bell', 'ball', 'rug'];
 const NAMES = ['wave', 'yes', 'no', 'idk', 'laugh', 'bow', 'point', 'beckon', 'thinking', 'tap', 'thumbsUp', 'thumbsDown', 'sleep'];
 
 const SYS = `You control Thing, a severed hand that walks on its fingertips in a small room. Turn the request into JSON: {"steps":[...]}. Each step is EXACTLY one of:
@@ -21,6 +22,7 @@ const SYS = `You control Thing, a severed hand that walks on its fingertips in a
 {"do":"move","dir":"left"} — dir is one of: left, right, closer, back
 {"do":"turn","dir":"left"} — dir is one of: left, right, around
 {"do":"jump"}
+{"do":"use","thing":"switch"} — thing is one of: switch (the light switch), bell, ball, rug (nap)
 {"do":"gesture","name":"wave"} — name is one of: ${NAMES.join(', ')}
 Add "fast":true to a go or move step to run. Output ONLY the JSON object. If you do not understand, output {"steps":[]}.
 
@@ -48,6 +50,7 @@ export function stepsToPlan(steps, pos = { x: 0, z: 0 }) {
       plan.push({ do: 'walkTo', x, z, speed });
     } else if (s.do === 'turn') plan.push({ do: 'turn', deg: s.dir === 'around' ? 180 : s.dir === 'right' ? -90 : 90 });
     else if (s.do === 'jump') plan.push({ do: 'jump' });
+    else if (s.do === 'use' && THINGS.includes(s.thing)) plan.push({ do: 'use', target: s.thing });
     else if (s.do === 'gesture' && GESTURES[s.name]) plan.push({ do: 'gesture', name: s.name });
   }
   return plan.length ? plan : null;
