@@ -137,3 +137,18 @@ test('morse taps the asked text, and text with no code fails loudly', () => {
   m.step(0.05);
   assert.match(m.brain.st.detail, /no Morse code|has a Morse code/);
 });
+
+test('a gesture the sim cannot start yet is tried again, and an unknown one fails loudly', () => {
+  const m = mock();
+  let busy = true;
+  const start = m.sim.gesture;
+  m.sim.gesture = (name) => busy ? false : start(name);
+  m.brain.command([{ do: 'gesture', name: 'wave' }], { source: 'key' });
+  m.step(0.3);
+  assert.equal(m.brain.st.status, 'acting', 'still waiting, not an error');
+  busy = false; m.step(0.05);
+  assert.deepEqual(m.calls.at(-1), ['gesture', 'wave']);
+  m.brain.command([{ do: 'gesture', name: 'moonwalk' }], { source: 'key' });
+  m.step(0.05);
+  assert.match(m.brain.st.detail, /unknown gesture "moonwalk"/);
+});

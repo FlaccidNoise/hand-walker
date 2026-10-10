@@ -207,7 +207,7 @@ function makeSim(rig, calib) {
     gait: 'walk', gaitT: 0, phase: 0, f: 0, vEff: 0, speed: 0, planted: 0,
     airborne: false, replant: false, landed: false, time: 0,
     spr: { pitch: { x: 0, v: 0 }, roll: { x: 0, v: 0 } },
-    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, turnWait: 0, hop: null, rng: 1,
+    gaitP: {}, gesture: null, carry: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, turnWait: 0, hop: null, rng: 1,
   };
   // seeded LCG: the sim core replays exactly (Math.random broke that after 8 s idle)
   let stopKick = false;
@@ -242,11 +242,23 @@ function makeSim(rig, calib) {
   // pinned world feet every frame); digits via pose tracks in src/gestures.js.
   const NO_GESTURE = { pitch: 0, roll: 0, heading: 0, height: 0, lift: 0 };
   function gesturePose() {
-    const g = s.gesture, b = g && g.def.body;
-    if (!b) return NO_GESTURE;
-    const u = g.t / g.dur;
-    return { pitch: sampleTrack(b.pitch, u), roll: sampleTrack(b.roll, u),
-      heading: 0, height: sampleTrack(b.height, u), lift: sampleTrack(b.lift, u) };
+    const g = s.gesture, b = g && g.def.body, c = s.carry;
+    if (!b && !c) return NO_GESTURE;
+    const u = g ? g.t / g.dur : 0;
+    const p = b ? { pitch: sampleTrack(b.pitch, u), roll: sampleTrack(b.roll, u),
+      heading: 0, height: sampleTrack(b.height, u), lift: sampleTrack(b.lift, u) } : { ...NO_GESTURE };
+    if (c) {                                                 // a gesture cut short eases out, it does not pop
+      const k = 1 - c.t * c.t * (3 - 2 * c.t);
+      p.pitch += c.pitch * k; p.roll += c.roll * k; p.height += c.height * k;
+    }
+    return p;
+  }
+  // end a stance gesture now: its body pose is carried and eased out over GESTURE_CUT s
+  function dropGesture() {
+    const p = gesturePose();
+    s.gesture = null;
+    s.carry = Math.abs(p.pitch) + Math.abs(p.roll) + Math.abs(p.height) > 1e-4
+      ? { pitch: p.pitch, roll: p.roll, height: p.height, t: 0 } : null;
   }
   // hover gestures (thumbsUp/thumbsDown/flipBird): the whole hand leaves the ground
   // (def.hover === true) — every digit gets a pose-track entry (def.digits[f] for
@@ -256,12 +268,18 @@ function makeSim(rig, calib) {
   // clean full liftoff) and the grounded physics/belly-scrape blocks skipped — see
   // step(). Re-plants via applyBodyPose+reseedFeet on end, mirroring jump's landing.
   const hovering = () => !!(s.gesture && s.gesture.def.hover);
-  const cancelIdle = () => { if (s.gesture && s.gesture.idle) s.gesture = null; };
+  const cancelIdle = () => { if (s.gesture && s.gesture.idle) dropGesture(); };
   const markInput = () => { cancelIdle(); s.lastInput = s.time; };
   function gesture(name) {
     const def = GESTURES[name];
     markInput();
-    if (!def || s.airborne || s.speed > C.V_MOVE || s.gesture || s.pivotTarget != null) return false;
+    if (!def || s.airborne || s.speed > C.V_MOVE || s.pivotTarget != null) return false;
+    // a new gesture replaces a stance gesture at once. A hover has the hand in the air
+    // as a fist: it finishes first (the caller tries again)
+    if (s.gesture) { if (s.gesture.def.hover) return false; dropGesture(); }
+    // a hover lifts off from the settled stance only: started while a cut gesture was
+    // still easing out, the closing fist met the floor and a digit was thrown 1.03 u
+    if (def.hover && (s.carry || !FINGERS.every(f => legs[f].mode === 'stance'))) return false;
     s.gesture = { name, t: 0, dur: def.dur, def };
     return true;
   }
@@ -592,9 +610,10 @@ function makeSim(rig, calib) {
     // --- SI physics (§4.8) ---
     s.speed = Math.hypot(s.v.x, s.v.z);
     // gesture engine: block/cancel while airborne or moving (locomotion owns the pose then)
+    if (s.carry && (s.carry.t += dt / C.GESTURE_CUT) >= 1) s.carry = null;
     if (s.gesture) {
       const wasHover = hovering();
-      if (s.airborne || s.speed > C.V_MOVE) s.gesture = null;
+      if (s.airborne || s.speed > C.V_MOVE) { if (wasHover) s.gesture = null; else dropGesture(); }
       else {
         const u0 = s.gesture.t / s.gesture.dur;
         s.gesture.t += dt;
@@ -790,7 +809,7 @@ function makeSim(rig, calib) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
-    s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null; s.turnWait = 0; s.hop = null;
+    s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.carry = null; s.pivotTarget = null; s.turnWait = 0; s.hop = null;
     s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
     s.spr.pitch.x = s.spr.pitch.v = s.spr.roll.x = s.spr.roll.v = 0; stopKick = false;
     body.position.set(px, calib.standH, pz);

@@ -62,7 +62,8 @@ export function makeBrain(sim, rig, camera, props = null) {
     gesture(a) {
       if (!a.started) {
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
-        if (!sim.gesture(a.name)) throw `unknown gesture "${a.name}"`;
+        if (!GESTURES[a.name]) throw `unknown gesture "${a.name}"`;
+        if (!sim.gesture(a.name)) return RUNNING;        // a hover or a pivot is finishing: try again
         a.started = true; return RUNNING;
       }
       return sim.s.gesture ? RUNNING : DONE;

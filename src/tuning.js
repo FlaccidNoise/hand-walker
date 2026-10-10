@@ -208,6 +208,7 @@ export const NEIGHBORS = {
 // --- Gestures: pose-track definitions (durations, amplitudes, keyframes) live in
 // src/gestures.js — the def IS the tuning. Authoring rules + refuted approaches
 // (NO body-heading tracks; part-curled digit bases) are documented there.
+export const GESTURE_CUT = 0.2;        // s — a gesture cut short eases its body pose out over this
 export const IDLE_AFTER = 8;          // s sim since last input before idles start —
                                       // must exceed every QA quiet stretch (rest = 3 s)
 export const IDLE_GAP = 5;            // s sim between idles (±30% jitter)

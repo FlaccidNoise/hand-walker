@@ -204,13 +204,13 @@ function makeRecorder(H) {
         cmdEnd: L.tStop != null ? +(L.tStop - L.t0).toFixed(2) : null,   // sim s until the last command ended
       };
       const fails = [];
-      const G = name === 'gestures';                         // digits are posed, not stepping: gait bars do not apply
+      const G = name === 'gestures' || name === 'gestureCut';   // digits are posed, not stepping: gait bars do not apply
       // travel scenarios are judged per unit walked (a long run is not worse than a short
       // one); in-place scenarios keep the absolute bar
       if (!G && m.slidePerU != null && L.dist > 4) {
         if (m.slidePerU > (SLIDE_PER_U[name] ?? CRIT.slidePerU)) fails.push(`slide/u ${m.slidePerU}`);
       } else if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
-      if (name === 'gestures' && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
+      if (G && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
       if (m.touchdown > (TOUCH[name] ?? CRIT.touchdown)) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
       if (name === 'stop' && m.stopSettle > CRIT.stopSettle) fails.push(`settle ${m.stopSettle}s`);
       if (name === 'pivot180') {
@@ -279,6 +279,26 @@ const SCENARIOS = {
       if (back > CRIT.returnErr) bad.push(`${name} returns ${back.toFixed(3)} off rest`);
       if (!F.every(f => H.sim.legs[f].mode === 'stance')) bad.push(`${name} leaves a digit unplanted`);
     }
+    return bad;
+  },
+  // gestures cut short by the next one (mashed emote keys): no pop, no stuck digit.
+  // A hover refuses to be cut, and the caller's retry lands when it has set down.
+  async gestureCut(H) {
+    const tips = () => F.map(f => H.rig.digits[f].tip.getWorldPosition(new H.THREE.Vector3()));
+    const rest = tips(), bad = [];
+    for (const [name, ms] of [['bow', 600], ['wave', 500], ['dance', 1300], ['tap', 400], ['sleep', 1500], ['knock', 700], ['laugh', 300], ['idk', 300]]) {
+      if (!H.gesture(name)) bad.push(`${name} refused over a stance gesture`);
+      await sleep(ms);
+    }
+    let up = false;                                          // a hover waits for the cut gesture to settle
+    for (let i = 0; i < 40 && !up; i++) { up = H.gesture('thumbsUp'); if (!up) await sleep(50); }
+    if (!up) bad.push('thumbsUp never started after a cut gesture');
+    await sleep(400);
+    if (H.gesture('wave')) bad.push('a hover was cut short');
+    for (let i = 0; i < 12; i++) { await sleep(500); H.sim.s.lastInput = H.sim.s.time; }
+    const back = Math.max(...tips().map((p, i) => p.distanceTo(rest[i])));
+    if (back > CRIT.returnErr) bad.push(`ends ${back.toFixed(3)} off rest`);
+    if (!F.every(f => H.sim.legs[f].mode === 'stance')) bad.push('leaves a digit unplanted');
     return bad;
   },
   async pivot180(H) { H.pivot(90); await sleep(2200); H.pivot(90); await sleep(2200); },   // two stepping pivots
