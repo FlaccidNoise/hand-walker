@@ -7,6 +7,7 @@ import { solveLeg, applyCurl, resetToBind, tipLocal, groundConstrain, padHeight,
 import { groundY } from './src/terrain.js';
 import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
 import { makeBrain } from './src/brain.js';
+import { initInput } from './src/input.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import { digitRatio, strideBudget, digitDuty } from './src/gait.js';
@@ -62,7 +63,9 @@ async function init() {
   };
   window.__hand = __hand;
 
-  // keyboard: dev keys only — direct control removed, the brain drives (Phase A)
+  const input = initInput({ renderer, camera, controls, scene, rig, brain });
+
+  // dev keys (movement, emotes and clicks live in src/input.js)
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
@@ -70,12 +73,12 @@ async function init() {
     if (DEV && k === 'r') { brain.stop(); sim.reset(); }
   });
 
-  // talk UI: hold Space = push-to-talk (Web Speech STT), or type a command
+  // talk UI: hold V = push-to-talk (Web Speech STT), or type a command. Space jumps.
   const talkState = document.getElementById('talkState');
   const talkText = document.getElementById('talkText');
   const setTalk = (msg, err = false) => { talkState.textContent = msg; talkState.className = err ? 'err' : ''; };
   brain.st.onstatus = (st) =>
-    setTalk(st.status === 'idle' ? 'hold SPACE to talk' : `${st.status} ${st.detail}`, st.status === 'error');
+    setTalk(st.status === 'idle' ? 'hold V to talk' : `${st.status} ${st.detail}`, st.status === 'error');
   talkText.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Enter' && talkText.value.trim()) { brain.ask(talkText.value.trim()); talkText.value = ''; }
@@ -85,7 +88,7 @@ async function init() {
   else {
     let rec = null, transcript = '', micErr = false;
     addEventListener('keydown', (e) => {
-      if (e.code !== 'Space' || e.repeat || e.target === talkText || rec) return;
+      if (e.code !== 'KeyV' || e.repeat || e.target === talkText || rec) return;
       e.preventDefault();
       transcript = ''; micErr = false;
       rec = new SR();
@@ -97,13 +100,13 @@ async function init() {
       rec.onerror = (ev) => { micErr = true; setTalk(`mic error: ${ev.error}`, true); };
       rec.onend = () => {
         if (transcript) brain.ask(transcript);
-        else if (!micErr && brain.st.status === 'idle') setTalk('hold SPACE to talk');
+        else if (!micErr && brain.st.status === 'idle') setTalk('hold V to talk');
       };
       rec.start();
       setTalk('listening: …');
     });
     addEventListener('keyup', (e) => {
-      if (e.code === 'Space' && rec) { rec.stop(); rec = null; }
+      if (e.code === 'KeyV' && rec) { rec.stop(); rec = null; }
     });
   }
 
@@ -127,6 +130,7 @@ async function init() {
       if (acc >= C.SIM_DT) acc = 0;                          // overloaded: drop time, never feed a long step
       else if (acc < 0) acc = 0;
     }
+    input.update(dt);
     if (controls.enabled) controls.update();                 // fixed diorama camera; orbit is debug-only
     renderer.render(scene, camera);
     if (state.debug) drawDebug(dbg, rig, sim);
@@ -158,7 +162,7 @@ function makeSim(rig, calib) {
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', gaitT: 0, phase: 0, f: 0, vEff: 0, speed: 0, planted: 0,
     airborne: false, replant: false, time: 0,
-    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, turnWait: 0, rng: 1,
+    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, turnWait: 0, hop: null, rng: 1,
   };
   // seeded LCG: the sim core replays exactly (Math.random broke that after 8 s idle)
   const rand = () => (s.rng = (s.rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
@@ -482,12 +486,24 @@ function makeSim(rig, calib) {
     const cmdSpeed = Math.hypot(s.cmd.x, s.cmd.z);
 
     // --- steering ---
+    if (s.airborne && s.hop) {                                // hop-turn: spin to the new heading in the air
+      s.hop.t = Math.min(s.hop.t + dt / C.HOP_TIME, 1);
+      const u = s.hop.t * s.hop.t * (3 - 2 * s.hop.t);
+      s.heading = M.wrapAngle(s.hop.from + M.wrapAngle(s.hop.to - s.hop.from) * u);
+      s.yawRate = 0;
+    }
     if (s.airborne) s.pivotTarget = null;                    // a jump interrupts a pivot
     if (s.pivotTarget != null) {                              // pivot-in-place: decoupled from
       const err = M.wrapAngle(s.pivotTarget - s.heading);     // the cmdSpeed gate below — turns
       if (Math.abs(err) < C.PIVOT_DONE_EPS) { s.pivotTarget = null; s.yawRate = 0; s.turnWait = 0; }
       else if (s.speed > C.V_MOVE || (s.yawRate === 0 && !settled() && (s.turnWait += dt) < C.TURN_WAIT))
         s.yawRate = 0;                                        // still braking or stepping home: the turn waits
+      else if (s.yawRate === 0 && Math.abs(err) > C.HOP_TURN && s.planted >= 3) {
+        // a big turn is ONE small hop: stepping round 180° takes 2.4 s (the finger-yaw
+        // cone caps a stepping pivot near 1.5 rad/s) and reads as dithering. No foot slides.
+        s.hop = { from: s.heading, to: s.pivotTarget, t: 0 };
+        s.vy = rig.G * C.HOP_TIME / 2; s.airborne = true; s.pivotTarget = null; s.turnWait = 0;
+      }
       else {
         const want = M.clamp(C.PIVOT_GAIN * err, -C.PIVOT_YAW_MAX, C.PIVOT_YAW_MAX);
         s.yawRate += M.clamp(want - s.yawRate, -C.PIVOT_ACCEL * dt, C.PIVOT_ACCEL * dt);
@@ -579,6 +595,7 @@ function makeSim(rig, calib) {
     else body.position.y += s.vy * dt;
     if (s.airborne && s.vy <= 0 && body.position.y <= gY + calib.standH) {
       s.airborne = false; s.vy *= 0.1;                       // touchdown; springs absorb the rest
+      if (s.hop) { s.heading = s.hop.to; s.hop = null; }
       applyBodyPose(); reseedFeet();
     }
     applyBodyPose();
@@ -703,7 +720,7 @@ function makeSim(rig, calib) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
-    s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null; s.turnWait = 0;
+    s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null; s.turnWait = 0; s.hop = null;
     s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();

@@ -31,12 +31,14 @@ function parseFirstJSON(text) {
 export function makeBrain(sim, rig, camera) {
   const body = rig.mount;
   const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null };
+  let bClock = 0;                                        // brain time, s sim
   // walls are visual-only in the sim; the brain is the only control path, so every
   // walk target clamps to the room interior and Thing simply never leaves
   const ROOM = C.ROOM.half;
   const clampRoom = (p) => ({ x: M.clamp(p.x, -ROOM, ROOM), z: M.clamp(p.z, -ROOM, ROOM) });
+  let statusAt = 0;                                      // bClock when the status last changed
   const setStatus = (status, detail = '') => {
-    st.status = status; st.detail = detail;
+    st.status = status; st.detail = detail; statusAt = bClock;
     if (st.onstatus) st.onstatus(st);
   };
   const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; setStatus('error', msg); };
@@ -127,6 +129,21 @@ export function makeBrain(sim, rig, camera) {
     if (st.i >= 0 || st.status !== 'idle') { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); }
   }
 
+  // ---- ONE command layer: keys, clicks, voice and idle behaviors all enter here.
+  // A hand-on-the-controls source outranks a slower one: a voice reply that lands
+  // while a key is held (or within OWN_HOLD s of a click) is dropped, not obeyed late.
+  const RANK = { auto: 0, voice: 1, click: 2, key: 3 }, OWN_HOLD = 0.5;
+  let owner = 'auto', ownerAt = -1e9;
+  function command(plan, { source = 'click', tag = null } = {}) {
+    if (RANK[source] === undefined) throw new Error(`brain.command: unknown source "${source}" — use key, click, voice or auto`);
+    if (RANK[source] < RANK[owner] && st.i >= 0 && bClock - ownerAt < OWN_HOLD) return false;
+    if (source !== 'auto') lastUserAt = bClock;          // real user input — behaviors reschedule
+    if (!run(plan, tag)) return false;
+    owner = source; ownerAt = bClock;
+    return true;
+  }
+  const cancel = () => { owner = 'auto'; stop(); };
+
   // ---- idle behaviors: compound plans when the USER goes quiet. Tracks its own
   // user-inactivity clock — the sim's lastInput is useless here because the
   // behaviors' own autoWalk/gesture calls stamp it.
@@ -149,7 +166,7 @@ export function makeBrain(sim, rig, camera) {
       { do: 'walkTo', x: 0, z: 2.4, speed: 0.6 }, { do: 'wait', s: rnd(1, 2) },
       { do: 'gesture', name: 'thinking' } ] },
   ];
-  let bClock = 0, lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER;
+  let lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER;
   function behave(name) {                                 // also a headless test hook
     const b = BEHAVIORS.find(x => x.name === name) ?? BEHAVIORS[0];
     return run(b.plan(), b.name);
@@ -171,6 +188,8 @@ export function makeBrain(sim, rig, camera) {
   }
   function tick(dt) {
     bClock += dt;
+    // 'saying' and 'error' are not states to live in: idle behaviors need 'idle'
+    if (st.i < 0 && (st.status === 'saying' || st.status === 'error') && bClock - statusAt > C.STATUS_HOLD) setStatus('idle');
     maybeBehave();
     if (st.i < 0) return;
     const a = st.plan[st.i];
@@ -214,7 +233,9 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     }
     return `[state: pos (${p.x.toFixed(1)}, ${p.z.toFixed(1)}), heading ${(h * 180 / Math.PI).toFixed(0)}°${user}]`;
   }
+  let askGen = 0;                                        // a newer ask() retires every older reply
   async function ask(text) {
+    const gen = ++askGen;
     stop();
     lastUserAt = bClock;                                 // real user input — behaviors reschedule
     setStatus('thinking', text);
@@ -234,15 +255,16 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       reply = parseFirstJSON(data.text);
     } catch (e) {
-      setStatus('error', e.name === 'AbortError' ? 'brain timed out (20s)' : String(e.message || e));
+      if (gen === askGen) setStatus('error', e.name === 'AbortError' ? 'brain timed out (20s)' : String(e.message || e));
       return null;
     }
+    if (gen !== askGen) return null;                     // superseded while the LLM was thinking
     history.push({ role: 'model', parts: [{ text: JSON.stringify(reply) }] });
     if (reply.say) {
       setStatus('saying', reply.say);
       speak(reply.say);                                  // fire-and-forget: plan runs meanwhile
     }
-    if (Array.isArray(reply.plan) && reply.plan.length) run(reply.plan.slice(0, 20));
+    if (Array.isArray(reply.plan) && reply.plan.length) command(reply.plan.slice(0, 20), { source: 'voice' });
     else if (!reply.say) setStatus('error', 'brain returned no plan and nothing to say');
     return reply;
   }
@@ -283,5 +305,5 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave };
+  return { st, run, stop, tick, ask, speak, behave, command, cancel };
 }

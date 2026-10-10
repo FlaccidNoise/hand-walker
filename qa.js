@@ -279,7 +279,18 @@ const SCENARIOS = {
     }
     return bad;
   },
-  async pivot180(H) { H.pivot(180); await sleep(4500); },
+  async pivot180(H) { H.pivot(90); await sleep(2200); H.pivot(90); await sleep(2200); },   // two stepping pivots
+  // a reversal is one hop: it must land on the new heading, on all five, fast
+  async hopTurn(H) {
+    const h0 = H.sim.s.heading, t0 = H.sim.s.time;
+    H.pivot(180);
+    let t = null;
+    for (let i = 0; i < 40; i++) { await sleep(50); if (t == null && !H.sim.s.airborne && H.sim.s.pivotTarget == null && H.sim.s.planted === 5) t = H.sim.s.time - t0; }
+    const off = Math.abs(Math.abs(H.sim.s.heading - h0) - Math.PI), bad = [];
+    if (off > 0.05) bad.push(`hop-turn lands ${(off * 57.3).toFixed(1)}° off`);
+    if (t == null || t > 0.6) bad.push(`hop-turn takes ${t == null ? 'over 1.5' : t.toFixed(2)} s`);
+    return bad;
+  },
   // the click-to-walk path: four brain walkTo legs with 90° course changes (on the
   // flat side of the room: the step at (0, 2.4) is a terrain test, not a gait one)
   async clickWalk(H) {

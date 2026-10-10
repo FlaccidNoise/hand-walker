@@ -108,6 +108,8 @@ export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lowe
 
 // --- Steering / cadence ---
 export const TURN_PIVOT = 0.35;       // rad — a command further than this off the heading stops and pivots first
+export const HOP_TURN = 1.75;         // rad (100°) — a turn bigger than this is one hop, not a stepping pivot
+export const HOP_TIME = 0.18;         // s in the air for a hop-turn (apex ≈ G·T²/8 = 0.46 u)
 export const TURN_WAIT = 0.6;         // s — longest a pivot waits for the feet to step home before it starts anyway
 export const ARC_SWEEP = 0.1;         // rad — arc a planted foot may sweep per stance while steering under way
 export const STEER_GAIN = 6;          // yaw-rate gain toward the commanded heading (1/s)
@@ -201,6 +203,7 @@ export const NEIGHBORS = {
 export const IDLE_AFTER = 8;          // s sim since last input before idles start —
                                       // must exceed every QA quiet stretch (rest = 3 s)
 export const IDLE_GAP = 5;            // s sim between idles (±30% jitter)
+export const STATUS_HOLD = 3;          // s a 'saying' or 'error' status shows before the brain is idle again
 export const BEHAVE_AFTER = 30;       // s sim of USER quiet before brain-level idle
                                       // behaviors (wander/nap/…) — sim-level micro-idles
                                       // (IDLE_AFTER) fire much sooner and layer beneath
