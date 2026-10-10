@@ -1,7 +1,9 @@
 # hand-walker
 
-A severed hand that walks. Five fingers act as legs, each solved with inverse
-kinematics against procedural terrain. Runs in the browser with no build step.
+A severed hand that walks, in the manner of Thing. Five digits act as legs, each
+solved with inverse kinematics. It stands tall on its fingertips, struts and
+scuttles, turns with a hop, and lives in a small room with a light switch, a
+bell, a ball, and a rug. Runs in the browser with no build step.
 
 ![three.js](https://img.shields.io/badge/three.js-r175-black) ![no build](https://img.shields.io/badge/build-none-green)
 
@@ -15,10 +17,30 @@ npm run serve
 
 Open <http://localhost:8741>.
 
-`npm run serve` is just `python3 -m http.server 8741`. Any static file server
-works — the page loads `three` through a native import map pointing at the
-vendored copy in `vendor/`, so there is no bundler and no `npm install` needed
-to run.
+`npm run serve` starts `scripts/serve.py`: a static server on 127.0.0.1 with two
+optional proxies (`/llm`, `/tts`) that need `GEMINI_API_KEY`. Any static file
+server also works. The page loads `three` through a native import map pointing at
+the vendored copy in `vendor/`, so there is no bundler and no `npm install`
+needed to run.
+
+## Controls
+
+| Input | What it does |
+|---|---|
+| Click the floor | Walk there. Near targets strut, far ones scuttle, a double-click sprints |
+| Click the switch, bell, ball, or rug | Go and use it |
+| WASD or arrows | Walk, relative to the camera. Hold Shift to scuttle. Release to stop |
+| Q, E | Turn 45° left, right |
+| Space | Jump |
+| 1–0 | Wave, yes, no, shrug, laugh, bow, thumbs-up, peace, snap, double snap |
+| Type in the box, or hold V and speak | Plain commands work with no model: "wave", "go to the door then jump", "lights" |
+
+A double snap works the light switch from anywhere.
+
+Free-form requests need a language model. With the dev server and a key, that is
+Gemini. On a static host the page offers "load brain (340 MB)": a small model
+that runs in the browser on WebGPU. Nothing downloads before that button is
+pressed.
 
 ## Requirements
 
@@ -31,14 +53,17 @@ Tests need the dev dependencies:
 
 ```bash
 npm install
-npm run test:unit    # IK and geometry unit tests
-npm run test:calib   # gait calibration gate
-npm test             # headless QA gate (needs Chrome, see below)
+npm run serve &      # the gates load the page from localhost:8741
+npm run test:unit    # solver, gait math, rules, brain, props
+npm run test:calib   # calibration snapshot gate
+npm test             # all of the above, then the gait matrix at 120 Hz and 60 Hz
 ```
 
-`npm test` and `npm run test:calib` drive a headless browser through
-`puppeteer-core`, which does **not** ship a browser. Point it at one you already
-have:
+The gait matrix runs the real page on a virtual clock, so its numbers do not
+depend on machine load or frame rate. It takes about 15 seconds.
+
+The gates drive a headless browser through `puppeteer-core`, which does **not**
+ship a browser. Point it at one you already have:
 
 ```bash
 CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm test
@@ -54,22 +79,30 @@ CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm t
 
 ```
 index.html      import map + canvas
-main.js         entry: builds scene, steps the gait loop
+main.js         page loop, sim core, calibration
 src/rig.js      finger/joint skeleton
 src/ik.js       leg solver, curl, ground constraint
+src/gait.js     per-digit duty and stride budget
+src/gestures.js gesture and emote pose tracks
+src/brain.js    command layer, plan executor, idle behaviors
+src/rules.js    text → plan by keyword rules
+src/llm.js      in-browser language model
+src/input.js    clicks and keys
+src/props.js    light switch, bell, ball, rug
+src/tuning.js   every constant
 src/terrain.js  procedural ground height
-src/scene.js    lighting and camera
+src/scene.js    room, lighting, camera
 vendor/         pinned three.js — do not edit by hand
-scripts/        headless test gates
-docs/           REBUILD-SPEC.md describes the intended architecture
+scripts/        dev server, headless gates, filmstrip tool
+docs/           plans, research, and REBUILD-SPEC.md (the original design)
 ```
 
 ## Related: procedural-hand-animation
 
 [procedural-hand-animation](https://github.com/FlaccidNoise/procedural-hand-animation)
-is the sibling of this project — the same premise explored down a different
-path, with a heavier voice/buddy layer and a single-file artifact build. This
-repo is the leaner take. Neither supersedes the other.
+is the sibling of this project: the same premise explored down a different path.
+Its click-to-walk, props, rules parser, and in-browser model were ported here in
+October 2026, and this repo is now the one under development.
 
 ## Note on `docs/REBUILD-SPEC.md`
 

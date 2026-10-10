@@ -1,6 +1,6 @@
 # Thing walk, control feel, and interactions
 
-Date: 2026-10-09. Status: proposed, not started.
+Date: 2026-10-09. Status as of 2026-10-10: Tasks 1–18 and 20–23 built. Task 19 (deploy) waits for the owner. What changed against this plan, and the measured results, are in `HANDOFF.md`.
 
 ## Header
 
