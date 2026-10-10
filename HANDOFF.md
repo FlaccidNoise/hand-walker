@@ -5,27 +5,35 @@
 
 ## State
 
-hand-walker is the product base. `procedural-hand-animation` is a donor only.
-The plan is `docs/plans/2026-10-09-thing-walk-and-control.md`. Research is in
-`docs/research/`. Tasks 1–18 and 20–23 are built. Task 19 (deploy to the website)
-waits for Josh.
+hand-walker is the only hand project. `procedural-hand-animation` was the donor
+for click-to-walk, props, the rules parser and the in-browser model. The plan is
+`docs/plans/2026-10-09-thing-walk-and-control.md`. Research is in
+`docs/research/`. Tasks 1–23 are built.
+
+Josh watched it on 2026-10-10: "already looking pretty good", and asked for more
+fun. The fun pass below is the answer. He has not yet watched the fun pass.
+
+The website builds from this repo: `personal-website/scripts/build-demos.mjs`
+copies `index.html main.js qa.js src vendor assets` into
+`public/demos/hand-walker/`. To redeploy: `node scripts/build-demos.mjs hand-walker`
+in `personal-website`, commit, push.
 
 The hand stands tall with the palm 34° nose-down and the stump up. It struts on
 0.61 u steps, scuttles on 0.80 u steps, stops hard into its stance, and turns
 by stop, pivot, go. A turn over 100° is one hop. It is driven by clicks, keys,
-typed or spoken text, and idle behaviors through one command layer.
+typed or spoken text, on-page buttons, and idle behaviors through one command layer.
 
 ## Verify
 
 ```bash
 npm run serve          # dev server on 127.0.0.1:8741 (serve.py: static + /llm + /tts)
-npm test               # unit (41) → calibration → matrix at 120 Hz → matrix at 60 Hz
+npm test               # unit (51) → calibration → matrix at 120 Hz → matrix at 60 Hz
 node scripts/qa-gate.mjs [scenario] [--hz N] [--save file.json]
 node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME
 ```
 
 - The matrix runs on a **virtual clock**. It is bit-reproducible and takes 15 s.
-  Baseline: 13/15 pass, 2 known red (`KNOWN_RED` in `qa.js`, each with its reason).
+  Baseline: 14/16 pass, 2 known red (`KNOWN_RED` in `qa.js`, each with its reason).
   `rest` slide must read exactly 0.
 - `test/look.baseline.json` holds every metric of the last accepted run.
 - `scripts/film.mjs` writes a contact sheet to `.debug/`. Look at it. Numbers and
@@ -63,6 +71,30 @@ node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME
 - **Text.** `src/rules.js` answers plain commands with no model. A local Gemini proxy answers the rest. On a static host the in-browser model (`src/llm.js`, Web-LLM pinned to 0.2.85) loads after the person presses "load brain (340 MB)".
 - **Props** (`src/props.js`): switch, bell, ball, rug. `{do:'use',target}`.
 
+## The fun pass (2026-10-10)
+
+- **Floor piano** along the west wall. `sim.onStep(f, foot)` fires at each touchdown
+  and `props.footfall` plays the key under the fingertip. On bare floor it is a soft tick.
+- **Sound** is synthesised in `src/props.js` and gated by `audio.on`, which the page
+  sets on the first key or pointer press. The headless gates never set it. M mutes.
+- **Poke**: a click within 0.6 u of the palm calls `brain.poke()`. Giggle, jump, wag,
+  tap, then the `sulk` routine. The count resets after `POKE_FORGET` (10 s).
+- **Cursor awareness** (`notice` in `src/input.js`): a mouse that rests on the floor for
+  1.6 s gets a turn and a point, and after 5 s more the hand walks over. `auto` source.
+- **Gestures**: `dance` (beat cues), `knock` (camera shake cue), `playDead`, and
+  `morseGesture(text)`, which builds a tap track from text (8 characters at most).
+- **Brain**: `{do:'morse',text}`, `{do:'routine',name}` with `dance`, `knock`, `sulk`,
+  and seven idle behaviours that use the room. Behaviours start after 14 s of quiet.
+- **A new gesture replaces a running stance gesture.** The old body pose eases out over
+  `GESTURE_CUT`. A hover finishes first and lifts off from the settled stance only.
+  Gate scenario `gestureCut` holds this.
+- **Page**: button row (`#keys`), phone layouts, and the camera backs off on a narrow
+  screen so the room fits. The numbers HUD shows only with `?dev` or the backtick.
+- `bow` and `sleep` are re-authored for the tall stance. Pitch +0.3 holds on the
+  planted digits (err 0.039). At +0.35 they re-step.
+- Voice is not offered when the host blocks the microphone. joshtaylor.world does,
+  with `Permissions-Policy: microphone=()` in `personal-website/netlify.toml`.
+
 ## Findings worth keeping
 
 - **The cross metric lied.** Hand-z lane order reads a pinky planted behind and outside the ring as a crossing. The gate now measures capsule distance between neighbouring finger shafts (`gap`, in flesh radii).
@@ -77,14 +109,14 @@ node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME
 
 ## Open
 
-1. **Deploy** (plan Task 19): repoint `personal-website/scripts/build-demos.mjs` at this repo and rewrite the project page. Needs Josh's yes.
-2. **Look pass by a person.** Posture (34°) and footfall order were chosen from metrics and stills. Josh has not watched it move yet.
+1. **Look pass on the fun pass.** Sound levels were set without ears: nobody has heard the footfall ticks, the piano, the dance beat or the Morse beeps yet.
+2. **Voice on the website** needs `microphone=(self)` for `/demos/hand-walker/*` in `personal-website/netlify.toml`. Josh's call: the site review switched it off on purpose.
 3. `jumpRun` red: ring and pinky pads overlap on the first strides after a running jump lands.
 4. `spam` red at 90 Hz only (chaos input).
 5. Pivots borrow the travel footfall patterns (finger gap 0.42–0.50). A pivot-specific pattern search is the fix.
-6. Gesture amplitudes were authored for the old posture. `bow` and `sleep` read small on the taller stance.
+6. The pinky re-steps twice during `dance` (roll plus bounce reach its limit). It reads as part of the dance.
 7. The stump is rigid with the palm. A stump bent further upright would match the films more closely (geometry bake at rig time).
-8. Backlog in `docs/research/interaction-ideas.md`: Morse tapping, knock on the glass, Thing's box, cursor awareness, floor piano, grab-and-carry.
+8. Backlog in `docs/research/interaction-ideas.md`: Thing's box, chess, the ransom note, grab-and-carry, a phonograph.
 
 ## Context and warnings
 

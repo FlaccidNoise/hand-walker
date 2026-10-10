@@ -111,7 +111,8 @@ docs/           plans, research, and REBUILD-SPEC.md (the original design)
 [procedural-hand-animation](https://github.com/FlaccidNoise/procedural-hand-animation)
 is the sibling of this project: the same premise explored down a different path.
 Its click-to-walk, props, rules parser, and in-browser model were ported here in
-October 2026, and this repo is now the one under development.
+October 2026. This repo is the one under development, and the one the live demo
+at <https://joshtaylor.world/demos/hand-walker/> is built from.
 
 ## Note on `docs/REBUILD-SPEC.md`
 
