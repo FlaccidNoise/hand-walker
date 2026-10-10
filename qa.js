@@ -32,6 +32,13 @@ function makeRecorder(H) {
   const stanceStart = {}, swingStart = {}, swingPeak = {}, towedT = {};
   let last = sim.s.time, raf = 0, on = true;
   const tmp = new V();
+  // look metrics: what the eye reads, beyond solve error
+  const L = {
+    yMin: Infinity, yMax: -Infinity, plantedMin: Infinity, dist: 0,
+    px: rig.mount.position.x, pz: rig.mount.position.z, cmdOn: false, tStop: null, tMove: null,
+    touchdown: 0, aloftClear: Infinity,
+    d: Object.fromEntries(F.map(f => [f, { mode: null, prev: null, from: null, peak: 0, clear: Infinity, steps: 0, len: 0, aloftT: 0 }])),
+  };
   const tick = () => {
     if (!on) return;
     raf = requestAnimationFrame(tick);
@@ -74,6 +81,38 @@ function makeRecorder(H) {
         swingStart[f] = null;
       }
     }
+    const hover = sim.s.gesture && sim.s.gesture.def.hover;
+    if (!sim.s.airborne && !hover) {
+      const hgt = body.y - H.groundY(body.x, body.z);
+      if (hgt < L.yMin) L.yMin = hgt;
+      if (hgt > L.yMax) L.yMax = hgt;
+      if (sim.s.planted < L.plantedMin) L.plantedMin = sim.s.planted;
+    }
+    L.dist += Math.hypot(body.x - L.px, body.z - L.pz); L.px = body.x; L.pz = body.z;
+    const cmdOn = Math.hypot(sim.s.cmdT.x, sim.s.cmdT.z) > 1e-6 || sim.s.pivotTarget != null;
+    if (L.cmdOn && !cmdOn) L.tStop = sim.s.time;
+    L.cmdOn = cmdOn;
+    const nSteps = Math.max(1, Math.round(dt / H.C.SIM_DT));
+    for (const f of F) {
+      const leg = sim.legs[f], d = rig.digits[f], q = L.d[f];
+      const tip = d.tip.getWorldPosition(tmp);
+      const clear = tip.y - d.flesh - H.groundY(tip.x, tip.z);
+      const moved = q.prev ? Math.hypot(tip.x - q.prev.x, tip.z - q.prev.z) : 0;
+      if (moved > 1e-4) L.tMove = sim.s.time;
+      if (leg.mode === 'swing') {
+        if (q.mode !== 'swing') { q.from = { x: tip.x, z: tip.z }; q.peak = -Infinity; }
+        if (clear > q.peak) q.peak = clear;
+      } else if (q.mode === 'swing' && leg.mode === 'stance') {
+        q.steps++; q.len += Math.hypot(tip.x - q.from.x, tip.z - q.from.z);
+        if (q.peak < q.clear) q.clear = q.peak;
+        if (moved / nSteps > L.touchdown) L.touchdown = moved / nSteps;   // u per sim step at landing
+      }
+      if (leg.mode === 'aloft') {
+        q.aloftT += dt;
+        if (q.aloftT > 0.4 && clear < L.aloftClear) L.aloftClear = clear;
+      } else q.aloftT = 0;
+      q.mode = leg.mode; q.prev = { x: tip.x, z: tip.z };
+    }
     for (const [a, b] of NEIGHBOR_PAIRS) {
       // carried legs (aloft/tuck) aren't stepping feet — lane order applies to
       // planted and swinging legs only (§4.6/§4.7)
@@ -101,6 +140,18 @@ function makeRecorder(H) {
         towed: r.towed,
         steps: r.steps,
         lift: r.lifts.length ? +(r.lifts.reduce((a, b) => a + b, 0) / r.lifts.length).toFixed(3) : null,
+        // look metrics (clear = worst swing peak clearance per digit; touchdown = tip
+        // travel in the landing sim step; stopSettle = s from zero command to stillness)
+        clear: Object.fromEntries(F.map(f => [f, L.d[f].steps ? +L.d[f].clear.toFixed(3) : null])),
+        aloftClear: L.aloftClear === Infinity ? null : +L.aloftClear.toFixed(3),
+        plantedMin: L.plantedMin === Infinity ? null : L.plantedMin,
+        stepLen: Object.fromEntries(F.map(f => [f, L.d[f].steps ? +(L.d[f].len / L.d[f].steps).toFixed(3) : null])),
+        footfallsPerU: L.dist > 0.5 ? +(r.steps / L.dist).toFixed(2) : null,
+        slidePerU: L.dist > 0.5 ? +(r.slide / L.dist).toFixed(3) : null,
+        touchdown: +L.touchdown.toFixed(4),
+        bodyBob: +(L.yMax - L.yMin).toFixed(3),
+        stopSettle: L.tStop != null && L.tMove != null ? +Math.max(L.tMove - L.tStop, 0).toFixed(3) : null,
+        dist: +L.dist.toFixed(2),
       };
       const fails = [];
       if (m.slide >= CRIT.slide) fails.push(`slide ${m.slide}`);
@@ -148,6 +199,15 @@ const SCENARIOS = {
   },
   async trot(H) { H.autoWalk(1.8, 0); await sleep(6000); H.autoWalk(0, 0); },
   async runFast(H) { H.autoWalk(2.5, 0); await sleep(6000); H.autoWalk(0, 0); },
+  async pivot180(H) { H.pivot(180); await sleep(2500); },
+  // the click-to-walk path: four brain walkTo legs with 90° course changes
+  async clickWalk(H) {
+    H.brain.run([{ do: 'walkTo', x: 3, z: 0, speed: 0.8 }, { do: 'walkTo', x: 3, z: 3, speed: 0.8 },
+      { do: 'walkTo', x: 0, z: 3, speed: 0.8 }, { do: 'walkTo', x: 0, z: 0, speed: 0.8 }]);
+    for (let i = 0; i < 400 && H.brain.st.i >= 0; i++) await sleep(100);
+    if (H.brain.st.status === 'error') throw new Error('clickWalk: brain ' + H.brain.st.detail);
+  },
+  async stop(H) { H.autoWalk(0.8, 0); await sleep(3000); H.autoWalk(0, 0); await sleep(2000); },
   async gaitShift(H) {
     for (const v of [0.4, 1.0, 1.7, 2.5, 1.7, 1.0, 0.4]) {
       H.autoWalk(v, 0); await sleep(1400);
@@ -160,6 +220,8 @@ const KNOWN_RED = {
   spam: 'seeded chaos input: lane order breaks under 160 ms direction flips',
   turnCycle: 'walk-and-turn scrub, the finger yaw cone binds (plan Task 17)',
   gaitShift: 'slide 0.55 across six gait changes (plan Tasks 6, 11)',
+  pivot180: 'pivot start has zero support and a 0.84 u hop (plan Task 6)',
+  clickWalk: 'course changes scrub 0.47 per u (plan Tasks 6, 17)',
 };
 
 async function scenario(name) {

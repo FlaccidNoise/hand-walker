@@ -2,15 +2,17 @@
 // and requestAnimationFrame are replaced before any page script runs, so the page's
 // real loop integrates exactly 1/hz per frame. Results are bit-reproducible and do not
 // depend on machine load or on the headless frame rate.
-// Usage: node scripts/qa-gate.mjs [scenarioName] [--hz N]     (default 120)
+// Usage: node scripts/qa-gate.mjs [scenarioName] [--hz N] [--save metrics.json]   (hz default 120)
 // Exit 0 when every scenario outside qa.js KNOWN_RED passes.
+import { writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
 const base = process.env.URL || 'http://localhost:8741/index.html';
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-let only = null, hz = 120;
+let only = null, hz = 120, save = null;
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === '--hz') hz = +process.argv[++i];
+  else if (process.argv[i] === '--save') save = process.argv[++i];
   else only = process.argv[i];
 }
 if (!(hz > 0)) { console.error('qa-gate: --hz needs a positive number, like --hz 60'); process.exit(2); }
@@ -24,6 +26,10 @@ function printRow(r, known) {
     `swing ${m.swingMin ?? '-'}..${m.swingMax ?? '-'}`, `steps ${m.steps}`,
     r.fails.length ? ' <- ' + r.fails.join(', ') + (known ? `  (known: ${known})` : '') : '',
   ].join(' '));
+  const c = m.clear, fx = (v) => v == null ? '-' : v;
+  console.log(`       look  clear t/i/m/r/p ${['thumb', 'index', 'middle', 'ring', 'pinky'].map(f => fx(c[f])).join('/')}` +
+    `  aloft ${fx(m.aloftClear)}  planted>=${fx(m.plantedMin)}  step ${fx(m.stepLen.middle)}  falls/u ${fx(m.footfallsPerU)}` +
+    `  slide/u ${fx(m.slidePerU)}  touchdown ${m.touchdown}  bob ${m.bodyBob}  settle ${fx(m.stopSettle)}`);
 }
 
 const browser = await puppeteer.launch({
@@ -54,6 +60,7 @@ try {
     rows.push(r); printRow(r, known[name]);
     if (only) console.log(JSON.stringify(r.metrics));
   }
+  if (save) writeFileSync(save, JSON.stringify(Object.fromEntries(rows.map(r => [r.name, r.metrics])), null, 1) + '\n');
   const bad = rows.filter(r => !r.pass && !known[r.name]);
   const healed = rows.filter(r => r.pass && known[r.name]);
   for (const r of healed) console.log(`note: ${r.name} passes now — remove it from KNOWN_RED in qa.js`);

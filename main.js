@@ -50,7 +50,7 @@ async function init() {
 
   const __hand = {
     rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES,
-    solveLeg, resetToBind, tipLocal, state, calib, sim, brain,
+    solveLeg, resetToBind, tipLocal, groundY, state, calib, sim, brain,
     reset: (...a) => { brain.stop(); sim.reset(...a); },
     autoWalk: (x, z) => sim.autoWalk(x, z),
     jump: () => sim.jump(),
