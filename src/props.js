@@ -54,6 +54,16 @@ export function pianoKey(p, x, z) {
 // before that, and the headless gates never set it, so they stay silent and fast.
 export const audio = { on: false, muted: false };
 let actx = null, noise = null;
+// call from a key or pointer handler: Safari starts a context only inside one.
+// Returns true once the context runs, so the page can stop listening.
+export function unlockAudio() {
+  audio.on = true;
+  try {
+    actx ??= new AudioContext();
+    if (actx.state === 'suspended') actx.resume();
+    return actx.state === 'running';
+  } catch (e) { console.warn('[props] audio unavailable:', e?.message || e); return true; }
+}
 const ctx = () => {
   if (!audio.on || audio.muted) return null;
   actx ??= new AudioContext();

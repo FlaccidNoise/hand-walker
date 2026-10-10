@@ -16,7 +16,8 @@ fun. The fun pass below is the answer. He has not yet watched the fun pass.
 The website builds from this repo: `personal-website/scripts/build-demos.mjs`
 copies `index.html main.js qa.js src vendor assets` into
 `public/demos/hand-walker/`. To redeploy: `node scripts/build-demos.mjs hand-walker`
-in `personal-website`, commit, push.
+in `personal-website`, commit, push. The site caches `/demos/*/assets/*` for a year:
+if the hand model changes, give the file a new name.
 
 The hand stands tall with the palm 34° nose-down and the stump up. It struts on
 0.61 u steps, scuttles on 0.80 u steps, stops hard into its stance, and turns
@@ -27,7 +28,8 @@ typed or spoken text, on-page buttons, and idle behaviors through one command la
 
 ```bash
 npm run serve          # dev server on 127.0.0.1:8741 (serve.py: static + /llm + /tts)
-npm test               # unit (51) → calibration → matrix at 120 Hz → matrix at 60 Hz
+npm test               # unit (51) → calibration → matrix at 120 Hz → matrix at 60 Hz → behave-check
+node scripts/behave-check.mjs   # every idle behaviour, routine and poke runs start to finish with no brain error
 node scripts/qa-gate.mjs [scenario] [--hz N] [--save file.json]
 node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME
 ```
@@ -109,6 +111,7 @@ node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME
 
 ## Open
 
+0. **Never run on a real phone or in Safari.** Taps, the phone layout and the audio unlock were checked in headless Chrome only.
 1. **Look pass on the fun pass.** Sound levels were set without ears: nobody has heard the footfall ticks, the piano, the dance beat or the Morse beeps yet.
 2. **Voice on the website** needs `microphone=(self)` for `/demos/hand-walker/*` in `personal-website/netlify.toml`. Josh's call: the site review switched it off on purpose.
 3. `jumpRun` red: ring and pinky pads overlap on the first strides after a running jump lands.

@@ -134,7 +134,7 @@ export function makeBrain(sim, rig, camera, props = null) {
   const TIMEOUT = {
     wait: (a) => (a.s ?? 1) + 1,
     jump: () => 5,
-    gesture: (a) => (GESTURES[a.name]?.dur ?? 4) + 4,      // sleep is 16s — dur-aware
+    gesture: (a) => (GESTURES[a.name]?.dur ?? 4) + 8,      // sleep is 16s — dur-aware. +8: it may wait out a hover (playDead, 6 s)
     morse: (a) => (morseGesture(a.text ?? 'sos')?.dur ?? 4) + 4,
     walk: (a) => 8 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // includes a lead-in pivot
     walkTo: (a) => a.tmo ?? 30,
@@ -238,7 +238,7 @@ export function makeBrain(sim, rig, camera, props = null) {
       { do: 'gesture', name: 'thinking' } ] },
     // the room is there to be played with
     { name: 'playing the piano', w: 3, plan: () => [{ do: 'use', target: 'piano' }] },
-    { name: 'chasing the ball', w: 3, plan: () => [{ do: 'use', target: 'ball' }, { do: 'wait', s: 0.6 }, { do: 'use', target: 'ball' }] },
+    { name: 'chasing the ball', w: 3, plan: () => [{ do: 'use', target: 'ball' }, { do: 'wait', s: 0.6 }, { do: 'gesture', name: 'laugh' }] },
     { name: 'ringing the bell', w: 2, plan: () => [{ do: 'use', target: 'bell' }, { do: 'gesture', name: 'laugh' }] },
     { name: 'knocking on the glass', w: 3, plan: () => [{ do: 'routine', name: 'knock' }] },
     { name: 'dancing', w: 2, plan: () => [{ do: 'routine', name: 'dance' }] },
@@ -432,5 +432,6 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
   }
   return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke,
     get idle() { return st.i < 0 && st.status === 'idle'; },
+    behaviors: BEHAVIORS.map(b => b.name), routines: Object.keys(ROUTINES),
     get needsLocal() { return llmDown && local.supported && !local.ready; } };
 }

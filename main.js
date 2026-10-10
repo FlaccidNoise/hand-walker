@@ -8,7 +8,7 @@ import { groundY } from './src/terrain.js';
 import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
 import { makeBrain } from './src/brain.js';
 import { initInput } from './src/input.js';
-import { makeProps, SOUNDS, audio } from './src/props.js';
+import { makeProps, SOUNDS, audio, unlockAudio } from './src/props.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import { digitRatio, strideBudget, digitDuty } from './src/gait.js';
@@ -61,9 +61,9 @@ async function init() {
   };
   sim.onStep = (f, foot) => props.footfall(f, foot.x, foot.z, sim.s.speed);
   // sound starts with the first key or pointer press (browsers refuse it before that)
-  const hear = () => { audio.on = true; };
-  addEventListener('pointerdown', hear, { once: true });
-  addEventListener('keydown', hear, { once: true });
+  const EARS = ['pointerup', 'keydown', 'click'];
+  const hear = () => { if (unlockAudio()) for (const t of EARS) removeEventListener(t, hear); };
+  for (const t of EARS) addEventListener(t, hear);
   const muteBtn = document.getElementById('muteBtn');
   const setMute = (m) => { audio.muted = m; muteBtn.textContent = m ? 'sound off' : 'sound on'; muteBtn.setAttribute('aria-pressed', String(m)); };
   muteBtn.addEventListener('click', () => setMute(!audio.muted));

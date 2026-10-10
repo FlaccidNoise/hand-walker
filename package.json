@@ -8,7 +8,7 @@
     "serve": "python3 scripts/serve.py",
     "test:unit": "node --test test/unit.test.mjs",
     "test:calib": "node scripts/calib-gate.mjs",
-    "test": "node --test test/*.test.mjs && node scripts/calib-gate.mjs && node scripts/qa-gate.mjs && node scripts/qa-gate.mjs --hz 60"
+    "test": "node --test test/*.test.mjs && node scripts/calib-gate.mjs && node scripts/qa-gate.mjs && node scripts/qa-gate.mjs --hz 60 && node scripts/behave-check.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

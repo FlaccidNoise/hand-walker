@@ -65,7 +65,7 @@ npm install
 npm run serve &      # the gates load the page from localhost:8741
 npm run test:unit    # solver, gait math, rules, brain, props
 npm run test:calib   # calibration snapshot gate
-npm test             # all of the above, then the gait matrix at 120 Hz and 60 Hz
+npm test             # all of the above, the gait matrix at 120 Hz and 60 Hz, then every idle behaviour
 ```
 
 The gait matrix runs the real page on a virtual clock, so its numbers do not
