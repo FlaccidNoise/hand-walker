@@ -11,7 +11,7 @@ The plan is `docs/plans/2026-10-09-thing-walk-and-control.md`. Research is in
 waits for Josh.
 
 The hand stands tall with the palm 34° nose-down and the stump up. It struts on
-0.60 u steps, scuttles on 0.76 u steps, stops hard into its stance, and turns
+0.61 u steps, scuttles on 0.80 u steps, stops hard into its stance, and turns
 by stop, pivot, go. A turn over 100° is one hop. It is driven by clicks, keys,
 typed or spoken text, and idle behaviors through one command layer.
 
@@ -38,16 +38,16 @@ node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME
 |---|---|---|
 | Standing wrist excursion at 60 Hz | 5.6 u (sim diverged) | 0 |
 | Wrist height, palm pitch | 0.886 u, 9° | 1.40 u, 34° |
-| Walk step length | 0.435 u | 0.60 u |
-| Footfalls per u, walk | 10.4 | 7.3 |
-| Slide per u, straight walk | 0.089 | 0.064 |
-| Thumb swing clearance, carried thumb | 0.031, 0.000 | 0.17, 0.18 |
+| Walk step length (trot) | 0.435 u (0.54) | 0.61 u (0.80) |
+| Footfalls per u, walk | 10.4 | 8.0 |
+| Slide per u, straight walk | 0.089 | 0.065 |
+| Thumb swing clearance, carried thumb | 0.031, 0.000 | 0.17, 0.20 |
 | Pivot start: min planted, wrist hop | 0, 0.84 u | 2, 0 |
-| turnCycle slide (red since July) | 6.94 | 0.34, green |
+| turnCycle slide (red since July) | 6.94 | 0.41, green |
 | Click-walk slide per u | 0.47 | 0.12 |
-| Touchdown tip speed, walk | 0.054 u per step | 0.006 |
+| Touchdown tip speed, walk | 0.054 u per step | 0.015 |
 | First lift after a command | 0.24 s | 0.044 s |
-| Stop from 0.8 u/s: all still, feet off rest | 1.29 s, up to 0.32 u | 0.48 s, ≤ 0.07 u |
+| Stop from 0.8 u/s: settled, feet off rest | 1.29 s, up to 0.32 u | 0.56 s, ≤ 0.08 u |
 | Gate run time, reproducible | 200 s, no | 15 s, yes |
 
 ## How it works now (what is new)
