@@ -117,12 +117,13 @@ async function init() {
       // 60 Hz frame (12.5 ms sim) fed straight in launches the standing hand
       acc += dt * C.TIME_SCALE;                              // TIME_SCALE slows the clock (§4.8)
       let n = 0;
-      while (acc >= C.SIM_DT && n++ < C.SIM_MAX_SUBSTEPS) {
+      while (acc >= C.SIM_DT - 1e-9 && n++ < C.SIM_MAX_SUBSTEPS) {  // ε: a 120 Hz frame is one step, not 0-then-2
         sim.step(C.SIM_DT);
         brain.tick(C.SIM_DT);
         acc -= C.SIM_DT;
       }
       if (acc >= C.SIM_DT) acc = 0;                          // overloaded: drop time, never feed a long step
+      else if (acc < 0) acc = 0;
     }
     if (controls.enabled) controls.update();                 // fixed diorama camera; orbit is debug-only
     renderer.render(scene, camera);

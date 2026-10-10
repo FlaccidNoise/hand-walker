@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer-core';
 const url = process.env.URL || 'http://localhost:8741/index.html';
 const expr = process.argv[2] || '({ok:true})';
 const settleMs = +(process.env.SETTLE_MS || 2500);
-const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({
   executablePath: chrome, headless: 'new',
   args: ['--no-first-run', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'],

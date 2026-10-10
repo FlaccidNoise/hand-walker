@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
 const url = process.env.URL || 'http://localhost:8741/index.html';
-const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 const OUT_DIR = new URL('../.debug', import.meta.url).pathname;
 

@@ -6,7 +6,7 @@ import { mkdirSync } from 'node:fs';
 import puppeteer from 'puppeteer-core';
 
 const url = process.env.URL || 'http://localhost:8741/index.html';
-const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 function parseArgs(argv) {
   const opts = { views: 'side,tq', run: null, wait: null, out: null, label: 'snap' };

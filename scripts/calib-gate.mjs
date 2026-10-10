@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const url = process.env.URL || 'http://localhost:8741/index.html';
 const snapPath = new URL('../test/calibration.snapshot.json', import.meta.url);
 const update = process.argv.includes('--update');
-const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 const browser = await puppeteer.launch({
   executablePath: chrome, headless: 'new',

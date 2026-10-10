@@ -5,10 +5,10 @@
   "private": true,
   "description": "Physics-driven walking severed hand (browser-only, no build step to run)",
   "scripts": {
-    "serve": "python3 -m http.server 8741",
+    "serve": "python3 scripts/serve.py",
     "test:unit": "node --test test/unit.test.mjs",
     "test:calib": "node scripts/calib-gate.mjs",
-    "test": "node scripts/qa-gate.mjs"
+    "test": "node --test test/*.test.mjs && node scripts/calib-gate.mjs && node scripts/qa-gate.mjs && node scripts/qa-gate.mjs --hz 60"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",
