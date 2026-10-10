@@ -8,6 +8,7 @@
 import * as C from './tuning.js';
 import * as M from './math.js';
 import { GESTURES } from './gestures.js';
+import { parseRules, isQuestion } from './rules.js';
 
 const RUNNING = 0, DONE = 1;
 
@@ -233,11 +234,27 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     }
     return `[state: pos (${p.x.toFixed(1)}, ${p.z.toFixed(1)}), heading ${(h * 180 / Math.PI).toFixed(0)}°${user}]`;
   }
+  let llmDown = false;                                   // set once /llm proves unreachable
+  // run a rules plan. `noModel`: say so when there is no rule and no LLM to ask.
+  function obey(plan, noModel = false) {
+    if (plan && !plan.length) return { plan };           // "stop": ask() already stopped
+    if (plan) { command(plan, { source: 'voice' }); return { plan }; }
+    if (noModel) {
+      command([{ do: 'gesture', name: 'idk' }], { source: 'voice' });
+      setStatus('saying', 'No language model on this page. Try: wave, go to the door, turn around, jump, take a nap.');
+    }
+    return null;
+  }
   let askGen = 0;                                        // a newer ask() retires every older reply
   async function ask(text) {
     const gen = ++askGen;
     stop();
     lastUserAt = bClock;                                 // real user input — behaviors reschedule
+    // keyword rules first: a plain command needs no model and no wait. Questions and
+    // anything the rules do not cover go to the LLM, when one is reachable.
+    const rules = parseRules(text, body.position);
+    if (rules && !isQuestion(text)) return obey(rules);
+    if (llmDown) return obey(rules, true);
     setStatus('thinking', text);
     history.push({ role: 'user', parts: [{ text: `${stateLine()} ${text}` }] });
     while (history.length > 12) history.shift();
@@ -255,7 +272,10 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       reply = parseFirstJSON(data.text);
     } catch (e) {
-      if (gen === askGen) setStatus('error', e.name === 'AbortError' ? 'brain timed out (20s)' : String(e.message || e));
+      if (gen !== askGen) return null;
+      // a static host answers /llm with a 404 page: no model here, and no point asking again
+      if (e instanceof SyntaxError || e instanceof TypeError) { llmDown = true; return obey(rules, true); }
+      setStatus('error', e.name === 'AbortError' ? 'brain timed out (20s)' : String(e.message || e));
       return null;
     }
     if (gen !== askGen) return null;                     // superseded while the LLM was thinking

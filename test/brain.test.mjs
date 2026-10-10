@@ -74,11 +74,35 @@ test('a stale LLM reply is dropped when a newer ask is in flight', async () => {
   const m = mock(), pending = [];
   globalThis.fetch = () => new Promise(res => pending.push(res));
   const reply = (plan) => ({ ok: true, json: async () => ({ text: JSON.stringify({ plan }) }) });
-  const first = m.brain.ask('wave at me'), second = m.brain.ask('jump');
+  const first = m.brain.ask('recite a poem'), second = m.brain.ask('tell me a story');
   pending[1](reply([{ do: 'jump' }]));                       // the newer answer lands first
   await second;
   pending[0](reply([{ do: 'gesture', name: 'wave' }]));      // the older one lands late
   assert.equal(await first, null);
   assert.equal(m.brain.st.plan[0].do, 'jump');
+  delete globalThis.fetch;
+});
+
+test('a plain command is obeyed by rules with no LLM call', async () => {
+  const m = mock(); let called = 0;
+  globalThis.fetch = () => { called++; return new Promise(() => {}); };
+  await m.brain.ask('wave');
+  m.step(0.05);
+  assert.equal(called, 0);
+  assert.deepEqual(m.calls.at(-1), ['gesture', 'wave']);
+  delete globalThis.fetch;
+});
+
+test('with no LLM reachable, an unknown request shrugs and says what works', async () => {
+  const m = mock();
+  globalThis.fetch = async () => ({ ok: false, json: async () => { throw new SyntaxError('Unexpected token <'); } });
+  await m.brain.ask('recite a poem');
+  assert.equal(m.brain.st.status, 'saying');
+  assert.match(m.brain.st.detail, /No language model/);
+  m.step(0.05);
+  assert.deepEqual(m.calls.at(-1), ['gesture', 'idk']);
+  let called = 0; globalThis.fetch = () => { called++; return new Promise(() => {}); };
+  await m.brain.ask('sing an aria');                          // does not ask the dead endpoint again
+  assert.equal(called, 0);
   delete globalThis.fetch;
 });
