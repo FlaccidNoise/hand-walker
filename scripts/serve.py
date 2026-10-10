@@ -73,6 +73,6 @@ class H(http.server.SimpleHTTPRequestHandler):
             self._json(500, {'error': f'{type(e).__name__}: {e}'})
 
 port = int(sys.argv[1]) if len(sys.argv) > 1 else 8741
-with http.server.ThreadingHTTPServer(('0.0.0.0', port), H) as s:
+with http.server.ThreadingHTTPServer(('127.0.0.1', port), H) as s:
     print(f'serving no-cache threaded on :{port}', flush=True)
     s.serve_forever()
