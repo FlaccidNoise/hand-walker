@@ -149,13 +149,14 @@ function makeSim(rig, calib) {
   const legs = {};
   const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
   const SEP_PAIRS = [['thumb', 'index'], ['index', 'middle'], ['middle', 'ring'], ['ring', 'pinky']];
+  const restA = {};                                          // per-digit stance angles, captured in reset()
   const sepPrev = {};
 
   const s = {
     v: new THREE.Vector3(), cmd: new THREE.Vector3(), cmdT: new THREE.Vector3(),
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', gaitT: 0, phase: 0, f: 0, speed: 0, planted: 0,
-    airborne: false, time: 0,
+    airborne: false, replant: false, time: 0,
     gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, rng: 1,
   };
   // seeded LCG: the sim core replays exactly (Math.random broke that after 8 s idle)
@@ -295,7 +296,7 @@ function makeSim(rig, calib) {
         .applyAxisAngle(UP, predHeading)                      // translation path (§4.6), just
         .add(_c.set(body.position.x + s.v.x * dur, 0, body.position.z + s.v.z * dur));
       landW.y = groundY(landW.x, landW.z) + padHeight(d);
-      leg.swing = { from: leg.foot.clone(), to: landW, t: 0, dur, rescue };
+      leg.swing = { from: leg.foot.clone(), to: landW, t: 0, dur, rescue, piv: true };
       leg.mode = 'swing';
       return;
     }
@@ -340,14 +341,40 @@ function makeSim(rig, calib) {
   function advanceSwing(f, dt) {
     const d = rig.digits[f], leg = legs[f], sw = leg.swing;
     sw.t = Math.min(sw.t + dt / sw.dur, 1);
-    const t = sw.t, ease = t * t * (3 - 2 * t);
+    if (sw.a0) {
+      // hover set-down ("landing gear"): while the body is still UP, blend JOINT ANGLES
+      // from the fist to the calibrated stance pose, hold it, and let the lift track
+      // lower the hand onto its fingertips. Unfurling at or near the floor walked the
+      // joints through the ground and the uncapped constraint threw the tip (0.6-1.3 u a step)
+      const a1 = restA[f], u = sw.t * sw.t * (3 - 2 * sw.t), a = {};
+      for (const k of ['yaw', 'mcp', 'pip', 'dip']) a[k] = sw.a0[k] + (a1[k] - sw.a0[k]) * u;
+      applyCurl(d, a);
+      rig.root.updateMatrixWorld(true);
+      groundConstrain(d, rig.root);
+      leg.angles = a;
+      if (sw.t >= 1 && !hovering()) {                         // touchdown: pin where the tip is
+        d.tip.getWorldPosition(leg.foot);
+        leg.mode = 'stance'; leg.swing = null; leg.err = 0;
+        solveStance(f);
+      }
+      return;
+    }
+    // ease-OUT: the tip arrives with ~zero horizontal speed (smoothstep left the unfold
+    // racing the rate cap: 0.054 u per step at touchdown → 0.006). Pivot swings keep the
+    // symmetric profile and full fold: extended early, a rotating swing cuts across its
+    // neighbour's lane (cross -0.104 vs -0.021)
+    const t = sw.t, ease = sw.piv ? t * t * (3 - 2 * t) : 1 - (1 - t) ** 3;
     const target = _b.lerpVectors(sw.from, sw.to, ease);
     target.y += C.GAITS[s.gait].arcH * Math.sin(Math.PI * t); // the ask; annulus is the cap (§5)
     const mcpW = d.mcp.getWorldPosition(_a);
     const vm = _c.copy(target).sub(mcpW);
     if (vm.length() < calib.dMin[f])                          // fold-annulus cap (§4.6)
       target.copy(mcpW).addScaledVector(vm.normalize(), calib.dMin[f]);
-    const fold = sw.rescue && t < C.RESCUE_HOLD ? 1 : Math.sin(Math.PI * t);
+    // fold is a liftoff pulse that ends by FOLD_END: the finger is extended for the
+    // rest of the swing, so the unfold never races the rate cap into touchdown
+    const fold = sw.rescue && t < C.RESCUE_HOLD ? 1
+      : sw.piv ? Math.sin(Math.PI * t)
+      : t < C.FOLD_END ? Math.sin(Math.PI * t / C.FOLD_END) : 0;
     solveLegWorld(f, target, C.RATE_SWING, dt, fold, null, true);
     if (t >= 1) {                                            // pin stance at the ACHIEVED tip
       d.tip.getWorldPosition(leg.foot);
@@ -456,11 +483,10 @@ function makeSim(rig, calib) {
       const wasHover = hovering();
       if (s.airborne || s.speed > C.V_MOVE) s.gesture = null;
       else { s.gesture.t += dt; if (s.gesture.t >= s.gesture.dur) s.gesture = null; }
-      if (wasHover && !s.gesture) {                        // hover end: never sets s.airborne,
-        body.position.y = groundY(body.position.x, body.position.z) + calib.standH;
-        s.vy = 0;                                          // so it never trips the jump-landing
-        applyBodyPose(); reseedFeet();                     // check below — replant explicitly
-      }
+      // hover end: digits re-plant through real swings (the gesture-exit path in the
+      // leg loop). The body is HELD at stance height until they are down — a reseed
+      // snapped all five from fist to planted in one step (0.95-1.33 u)
+      if (wasHover && !s.gesture) { s.replant = true; s.vy = 0; }
     } else if (!s.airborne && s.f === 0 && s.speed <= C.V_MOVE
         && s.time - s.lastInput > C.IDLE_AFTER && s.time >= s.nextIdleAt) {
       // left alone: weighted-random subtle idle; any input cancels instantly
@@ -501,7 +527,7 @@ function makeSim(rig, calib) {
     // hover: direct Y from the lift track, no ballistic fall — the capped-force
     // stance spring can't produce a clean full liftoff (planted is already 0 while
     // hovering, so N/traction above are already no-ops; this replaces the integrator)
-    if (hovering()) { body.position.y = gY + calib.standH + gesturePose().lift; s.vy = 0; }
+    if (hovering() || s.replant) { body.position.y = gY + calib.standH + gesturePose().lift; s.vy = 0; }
     else body.position.y += s.vy * dt;
     if (s.airborne && s.vy <= 0 && body.position.y <= gY + calib.standH) {
       s.airborne = false; s.vy *= 0.1;                       // touchdown; springs absorb the rest
@@ -579,6 +605,10 @@ function makeSim(rig, calib) {
         to.y = groundY(to.x, to.z) + padHeight(rig.digits[f]); // the foot dragged the tip
         leg.swing = { from: rig.digits[f].tip.getWorldPosition(new THREE.Vector3()),
           to, t: 0, dur: 0.2, rescue: false };                // across at the rate cap (jank)
+        if (hovering()) {                                     // digits' window closed mid-hover: gear down
+          leg.swing.a0 = { ...leg.angles };
+          leg.swing.dur = C.HOVER_UNFURL * s.gesture.dur;
+        }
         leg.mode = 'swing'; leg.cycleId = -1;
       }
       const cyc = s.phase * (gp.mult[f] ?? 1) + gd.offsets[f];
@@ -607,13 +637,14 @@ function makeSim(rig, calib) {
       if (leg.mode === 'swing') advanceSwing(f, dt);
       else solveStance(f, dt);
     }
+    if (s.replant && FINGERS.every(f => legs[f].mode === 'stance')) s.replant = false;
   }
 
   function reset(px = 0, pz = 0, heading = 0) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
-    s.airborne = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null;
+    s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null;
     s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();
@@ -622,6 +653,7 @@ function makeSim(rig, calib) {
       legs[f] = { mode: 'stance', foot: new THREE.Vector3(), swing: null, angles: null, err: 0, cycleId: -1 };
     }
     reseedFeet();                                            // reseed DIGITS, not just body (§7)
+    for (const f of FINGERS) restA[f] = { ...legs[f].angles };   // stance angles in the LIVE standing pose
   }
 
   function autoWalk(x, z) {                                  // velocity command, u/s

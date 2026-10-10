@@ -107,6 +107,7 @@ export const BAND_MARGIN = 0.03;      // keep landings this far inside the band 
 // rad of extra PIP curl at peak stepping fold, per digit. Thumb 0: its swing already
 // rides the CMC extension limit with the PIP at max, and more fold pins the tip to the floor
 export const FOLD = { thumb: 0, index: 0.6, middle: 0.6, ring: 0.6, pinky: 0.6 };
+export const FOLD_END = 0.6;           // swing phase by which the stepping fold is fully released
 export const RESCUE_DUR = 0.16;       // s — rescue swings take at least this
 export const RESCUE_HOLD = 0.55;      // rescue holds the fold until t=0.55
 
@@ -119,6 +120,7 @@ export const RATE_SWING = 18;
 export const RATE_CARRY = 7;           // aloft/tuck pose transitions — cosmetic, not steps;
                                        // at 18 rad/s the thumb visibly snapped (0.14u/frame)
 export const ALOFT_CLEAR = 0.14;       // u — carried digits hold their tip at least this far off the floor
+export const HOVER_UNFURL = 0.15;      // fraction of a hover gesture spent opening the fist to the stance pose in the air
 export const TUCK_MIN = 1.15;          // airborne legs never tuck below 1.15·standH
 
 // §5 stance rule: feet plant forward of the knuckles as descending diagonals — each

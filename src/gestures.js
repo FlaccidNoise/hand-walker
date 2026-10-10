@@ -52,7 +52,18 @@ const CURL = { yaw: 0, mcp: 0, pip: 0.5 };   // lifted part-curled base (the "no
 const WAVE_CURL = { yaw: 0, mcp: -0.25, pip: 0.65 };
 const WAVE_BOB = osc(2, 0.3);
 const FIST = { yaw: 0, mcp: 1.3, pip: 1.6 };  // tight curl for the 4 non-extended hover digits
-const HOVER_LIFT = [[0, 0], [0.15, 0.22], [0.6, 0.2], [0.85, 0.05], [1, 0]];
+// thumb folded across the fist. FIST on the thumb drives its CMC 1.3 rad toward the
+// floor: level at stance height it speared the ground and snapped 0.73 u on exit
+const THUMB_TUCK = { yaw: 0, mcp: 0.25, pip: 1.4 };
+// hover set-down: every hover digit closes its window at HOVER_WIN[1] (roll must be back
+// to 0 by then), opens to the stance pose in the air over HOVER_UNFURL of the gesture,
+// and only THEN does the lift lower the hand onto its fingertips (lift holds to 0.85).
+// The lift must clear a finger pointing straight down mid-unfurl: 0.22 was too low.
+const HOVER_WIN = [0, 0.7];
+const HOVER_LIFT = [[0, 0], [0.15, 0.45], [0.85, 0.45], [1, 0]];
+const hoverDigits = (extended, pose = CURL, thumb = FIST) => Object.fromEntries(
+  ['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
+    [f, { base: f === extended ? pose : f === 'thumb' ? thumb : FIST, win: HOVER_WIN }]));
 
 export const GESTURES = {
   yes: { dur: 1.1, body: { pitch: osc(2, 0.16) } },
@@ -123,30 +134,25 @@ export const GESTURES = {
   // from its neutral lateral position to point up/down)
   thumbsUp: {
     dur: 1.8, hover: true,
-    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.7, -1.4], [0.95, -0.15], [1, 0]] },
-    digits: {
-      thumb: { base: CURL }, index: { base: FIST }, middle: { base: FIST },
-      ring: { base: FIST }, pinky: { base: FIST },
-    },
+    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]] },
+    digits: hoverDigits('thumb'),
   },
+  // the thumb points DOWN: the wrist must ride a thumb-length higher than the other
+  // hovers, and stay up until the roll is back — at HOVER_LIFT the thumb speared the
+  // floor and the ground constraint snapped it 1.3-1.6 u in one step, twice per play
   thumbsDown: {
     dur: 1.8, hover: true,
-    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, 1.4], [0.7, 1.4], [0.95, 0.15], [1, 0]] },
-    digits: {
-      thumb: { base: CURL }, index: { base: FIST }, middle: { base: FIST },
-      ring: { base: FIST }, pinky: { base: FIST },
-    },
+    body: { lift: [[0, 0], [0.2, 0.8], [0.85, 0.8], [1, 0]],
+      roll: [[0, 0], [0.12, 0], [0.3, 1.4], [0.55, 1.4], [0.7, 0], [1, 0]] },
+    digits: hoverDigits('thumb'),
   },
   // middle finger extended, same roll thumbsUp/Down use (pitch was tried first —
   // rejected in-sim, the whole hand read as bunched to one side instead of a clean
   // one-finger-up silhouette; roll reads cleanly since it already works for thumb)
   flipBird: {
     dur: 1.8, hover: true,
-    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.7, -1.4], [0.95, -0.15], [1, 0]] },
-    digits: {
-      middle: { base: CURL }, thumb: { base: FIST }, index: { base: FIST },
-      ring: { base: FIST }, pinky: { base: FIST },
-    },
+    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]] },
+    digits: hoverDigits('middle', CURL, THUMB_TUCK),
   },
   // nap: settle low, pitch nose-down, curl slightly, and breathe slowly for the
   // whole hold — user-invokable ("take a nap") and the payoff of the 'nap' idle

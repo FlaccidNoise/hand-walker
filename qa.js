@@ -7,6 +7,7 @@
 //   swingDur  observed swing durations (s)                  in [0.11, 0.20]
 //   towed     any leg dragged planted at err>0.15 for >0.5s none
 //   clear     worst swing peak / carried-digit clearance (u)   >= 0.10
+//   touchdown tip travel in the landing sim step (u)           <= 0.035
 // KNOWN_RED scenarios are allowed to fail (named, with the reason); every other one
 // must pass. The gate runs on a virtual clock, so results are bit-reproducible.
 
@@ -14,9 +15,13 @@ const F = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 const NEIGHBOR_PAIRS = [['thumb', 'index'], ['index', 'middle'], ['middle', 'ring'], ['ring', 'pinky']];
 const CRIT = { slide: 0.5, cross: -0.05, floor: -0.01, tipErrP95: 0.08, swingLo: 0.11, swingHi: 0.20,
   clear: 0.10,     // every swing peak and every carried digit clears the floor by this
-  plantedMin: 2, bodyBob: 0.06 };   // pivot180 only: support never drops, the wrist does not hop
+  plantedMin: 2, bodyBob: 0.06,     // pivot180 only: support never drops, the wrist does not hop
+  tipStep: 0.12, returnErr: 0.02,   // gestures only: no digit snaps, every tip comes back to rest
+  touchdown: 0.035 };               // tip travel in the landing sim step: placed, not scuffed (was 0.054-0.070)
 // a pivot re-steps every digit ~10 times: its slide bar is its own (0.034 per stance)
 const SLIDE = { pivot180: 2.0 };
+// pivot steps keep the symmetric swing profile (lane order), so they land faster
+const TOUCH = { pivot180: 0.05 };
 
 // under the gate's virtual clock (scripts/qa-gate.mjs) waiting PUMPS frames, so a
 // scenario integrates an exact frame time and is bit-reproducible at any machine load
@@ -41,7 +46,7 @@ function makeRecorder(H) {
   const L = {
     yMin: Infinity, yMax: -Infinity, plantedMin: Infinity, dist: 0,
     px: rig.mount.position.x, pz: rig.mount.position.z, cmdOn: false, tStop: null, tMove: null,
-    touchdown: 0, aloftClear: Infinity, t0: sim.s.time,
+    touchdown: 0, aloftClear: Infinity, t0: sim.s.time, tipStep: 0,
     d: Object.fromEntries(F.map(f => [f, { mode: null, prev: null, from: null, peak: 0, clear: Infinity, steps: 0, len: 0, aloftT: 0 }])),
   };
   const tick = () => {
@@ -103,6 +108,8 @@ function makeRecorder(H) {
       const tip = d.tip.getWorldPosition(tmp);
       const clear = tip.y - d.flesh - H.groundY(tip.x, tip.z);
       const moved = q.prev ? Math.hypot(tip.x - q.prev.x, tip.z - q.prev.z) : 0;
+      const step3 = q.prev ? Math.hypot(moved, tip.y - q.prev.y) / nSteps : 0;
+      if (step3 > L.tipStep) L.tipStep = step3;
       if (moved > 1e-4) L.tMove = sim.s.time;
       if (leg.mode === 'swing') {
         if (q.mode !== 'swing') { q.from = { x: tip.x, z: tip.z }; q.peak = -Infinity; }
@@ -116,7 +123,7 @@ function makeRecorder(H) {
         q.aloftT += dt;
         if (q.aloftT > 0.4 && clear < L.aloftClear) L.aloftClear = clear;
       } else q.aloftT = 0;
-      q.mode = leg.mode; q.prev = { x: tip.x, z: tip.z };
+      q.mode = leg.mode; q.prev = { x: tip.x, y: tip.y, z: tip.z };
     }
     for (const [a, b] of NEIGHBOR_PAIRS) {
       // carried legs (aloft/tuck) aren't stepping feet — lane order applies to
@@ -154,21 +161,25 @@ function makeRecorder(H) {
         footfallsPerU: L.dist > 0.5 ? +(r.steps / L.dist).toFixed(2) : null,
         slidePerU: L.dist > 0.5 ? +(r.slide / L.dist).toFixed(3) : null,
         touchdown: +L.touchdown.toFixed(4),
+        tipStep: +L.tipStep.toFixed(3),                     // largest 3D tip move in one sim step
         bodyBob: +(L.yMax - L.yMin).toFixed(3),
         stopSettle: L.tStop != null && L.tMove != null ? +Math.max(L.tMove - L.tStop, 0).toFixed(3) : null,
         dist: +L.dist.toFixed(2),
         cmdEnd: L.tStop != null ? +(L.tStop - L.t0).toFixed(2) : null,   // sim s until the last command ended
       };
       const fails = [];
-      if (m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
+      const G = name === 'gestures';                         // digits are posed, not stepping: gait bars do not apply
+      if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
+      if (name === 'gestures' && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep}`);
+      if (m.touchdown > (TOUCH[name] ?? CRIT.touchdown)) fails.push(`touchdown ${m.touchdown}`);
       if (name === 'pivot180') {
         if (m.plantedMin < CRIT.plantedMin) fails.push(`planted ${m.plantedMin}`);
         if (m.bodyBob > CRIT.bodyBob) fails.push(`bob ${m.bodyBob}`);
       }
-      if (m.cross <= CRIT.cross) fails.push(`cross ${m.cross}`);
+      if (!G && m.cross <= CRIT.cross) fails.push(`cross ${m.cross}`);
       if (m.floor < CRIT.floor) fails.push(`floor ${m.floor}`);
       if (m.tipErrP95 >= CRIT.tipErrP95) fails.push(`tipErrP95 ${m.tipErrP95}`);
-      if (m.swingMin != null && (m.swingMin < CRIT.swingLo - 0.01 || m.swingMax > CRIT.swingHi + 0.01))
+      if (!G && m.swingMin != null && (m.swingMin < CRIT.swingLo - 0.01 || m.swingMax > CRIT.swingHi + 0.01))
         fails.push(`swingDur ${m.swingMin}-${m.swingMax}`);   // ±0.01: frame sampling quantum
       if (m.towed) fails.push('towed digit');
       const low = F.filter(f => m.clear[f] != null && m.clear[f] < CRIT.clear);
@@ -212,6 +223,23 @@ const SCENARIOS = {
   },
   async trot(H) { H.autoWalk(1.8, 0); await sleep(6000); H.autoWalk(0, 0); },
   async runFast(H) { H.autoWalk(2.5, 0); await sleep(6000); H.autoWalk(0, 0); },
+  // every gesture and idle, back to back: none may snap a digit, all must return to rest
+  async gestures(H) {
+    const tips = () => F.map(f => H.rig.digits[f].tip.getWorldPosition(new H.THREE.Vector3()));
+    const rest = tips(), bad = [];
+    for (const [name, def] of [...Object.entries(H.GESTURES), ...Object.entries(H.IDLES)]) {
+      if (H.GESTURES[name]) { if (!H.gesture(name)) bad.push(`${name} refused`); }
+      else { H.sim.s.gesture = null; H.sim.s.gesture = { name, t: 0, dur: def.dur, def, idle: true }; }
+      for (let t = 0; t < (def.dur + 0.5) / H.C.TIME_SCALE; t += 0.5) {
+        await sleep(500);
+        H.sim.s.lastInput = H.sim.s.time;                  // keep random idles and brain behaviors out
+      }
+      const back = Math.max(...tips().map((p, i) => p.distanceTo(rest[i])));
+      if (back > CRIT.returnErr) bad.push(`${name} returns ${back.toFixed(3)} off rest`);
+      if (!F.every(f => H.sim.legs[f].mode === 'stance')) bad.push(`${name} leaves a digit unplanted`);
+    }
+    return bad;
+  },
   async pivot180(H) { H.pivot(180); await sleep(4500); },
   // the click-to-walk path: four brain walkTo legs with 90° course changes
   async clickWalk(H) {
@@ -242,10 +270,11 @@ async function scenario(name) {
   H.reset();
   await sleep(2500);                                         // settle (§7 A/B hygiene)
   const rec = makeRecorder(H);
-  await SCENARIOS[name](H);
+  const extra = await SCENARIOS[name](H);                    // a scenario may return its own fail strings
   await sleep(800);                                          // let the last swings land
   const res = rec.stop(name);
-  return { name, ...res };
+  if (Array.isArray(extra)) res.fails.push(...extra);
+  return { name, ...res, pass: res.fails.length === 0 };
 }
 
 async function matrix() {
