@@ -52,6 +52,9 @@ export const PHASE_SEP = 0.25;         // min phase gap between spatially adjace
 export const BAND_UTIL = 0.8;          // cadence law targets this fraction of the pacer band —
                                        // 0.9/1.0 raise edge drift more than fewer steps save
 
+// --- Room (diorama): one size for the brain clamp, the walls, and the flat floor ---
+export const ROOM = { half: 4.8, wall: 5.5 };   // walk-target clamp · wall plane
+
 // --- Steering ---
 export const V_MAX = 3.4;             // u/s leash top — raised from 2.6: at 2.5 the user
                                       // couldn't tell run from walk; verify slide at 3.4

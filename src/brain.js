@@ -33,7 +33,7 @@ export function makeBrain(sim, rig, camera) {
   const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null };
   // walls are visual-only in the sim; the brain is the only control path, so every
   // walk target clamps to the room interior and Thing simply never leaves
-  const ROOM = 4.8;
+  const ROOM = C.ROOM.half;
   const clampRoom = (p) => ({ x: M.clamp(p.x, -ROOM, ROOM), z: M.clamp(p.z, -ROOM, ROOM) });
   const setStatus = (status, detail = '') => {
     st.status = status; st.detail = detail;
@@ -202,7 +202,7 @@ Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 - {"do":"jump"}
 - {"do":"wait","s":S}
 Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT — you speak in a dry, warm, upper-class British gentleman's voice, so phrase accordingly ("Right then", "I should think so", "Terribly sorry"). Only use say when a gesture cannot carry the answer.
-YOUR ROOM (a diorama the user looks into from a FIXED camera): floor spans x,z from -5 to 5. Solid walls on the west (-x) and north (-z) sides; the north wall has a doorway at (0,-4.5). The south/east sides are open, facing the viewer. Named spots: center (0,0); the little step (0, 2.4) — you can climb on it; back corner (-4,-4); doorway (0,-4.2); front-right corner (4,4) — nearest the viewer.
+YOUR ROOM (a diorama the user looks into from a FIXED camera): floor spans x,z from -${C.ROOM.half} to ${C.ROOM.half}. Solid walls on the west (-x) and north (-z) sides; the north wall has a doorway at (0,-4.5). The south/east sides are open, facing the viewer. Named spots: center (0,0); the little step (0, 2.4) — you can climb on it; back corner (-4,-4); doorway (0,-4.2); front-right corner (4,4) — nearest the viewer.
 SCREEN DIRECTIONS (camera never moves): screen-right = toward +x,-z; screen-left = toward -x,+z; toward the viewer = +x,+z; away = -x,-z. Use these when the user says left/right/closer/back.
 Each message starts with [state: ...] — your position and heading. "Come here" = walkTo near (3.5, 3.5) (the open front), then beckon or wave.
 Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk, say why briefly.`;

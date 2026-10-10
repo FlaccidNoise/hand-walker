@@ -14,6 +14,7 @@ import * as C from './src/tuning.js';
 const hud = document.getElementById('hud');
 const app = document.getElementById('app');
 const UP = new THREE.Vector3(0, 1, 0);
+const DEV = new URLSearchParams(location.search).has('dev');   // QA harness + reset/pause keys
 
 const state = {
   ready: false,
@@ -64,8 +65,8 @@ async function init() {
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
-    if (k === 'p') state.paused = !state.paused;
-    if (k === 'r') { brain.stop(); sim.reset(); }
+    if (DEV && k === 'p') state.paused = !state.paused;
+    if (DEV && k === 'r') { brain.stop(); sim.reset(); }
   });
 
   // talk UI: hold Space = push-to-talk (Web Speech STT), or type a command
@@ -135,6 +136,7 @@ async function init() {
     }
   }
   loop();
+  if (DEV) await import('./qa.js');
   state.ready = true;
 }
 
@@ -154,8 +156,10 @@ function makeSim(rig, calib) {
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', phase: 0, f: 0, speed: 0, planted: 0,
     airborne: false, time: 0,
-    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null,
+    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, rng: 1,
   };
+  // seeded LCG: the sim core replays exactly (Math.random broke that after 8 s idle)
+  const rand = () => (s.rng = (s.rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 
   // --- per-gait derived params (§4.5/§4.7): pacer band, patter multipliers, top speed ---
   for (const g of C.GAIT_ORDER) {
@@ -451,10 +455,10 @@ function makeSim(rig, calib) {
         && s.time - s.lastInput > C.IDLE_AFTER && s.time >= s.nextIdleAt) {
       // left alone: weighted-random subtle idle; any input cancels instantly
       const names = Object.keys(IDLES);
-      let r = Math.random() * names.reduce((a, n) => a + IDLES[n].w, 0);
+      let r = rand() * names.reduce((a, n) => a + IDLES[n].w, 0);
       const name = names.find(n => (r -= IDLES[n].w) <= 0) ?? names[0];
       s.gesture = { name, t: 0, dur: IDLES[name].dur, def: IDLES[name], idle: true };
-      s.nextIdleAt = s.time + IDLES[name].dur + C.IDLE_GAP * (0.7 + 0.6 * Math.random());
+      s.nextIdleAt = s.time + IDLES[name].dur + C.IDLE_GAP * (0.7 + 0.6 * rand());
     }
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
     // ride height is TERRAIN-RELATIVE (identical on flat ground where gY=0): with an
@@ -595,7 +599,7 @@ function makeSim(rig, calib) {
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
     s.airborne = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null;
-    s.lastInput = s.time; s.nextIdleAt = s.time;
+    s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();
     for (const f of FINGERS) {
@@ -858,6 +862,8 @@ function calibrate(rig) {
     laneDir, restExt, restsAt, scanBand, solveTo, setPose, bellyFloor };
 }
 
+// HUD goes through innerHTML and shows typed + LLM text: escape every dynamic field
+const esc = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 function devHUD(fps, rig, sim, calib, brain) {
   const s = sim.s;
   const lines = [
@@ -868,9 +874,9 @@ function devHUD(fps, rig, sim, calib, brain) {
       const l = sim.legs[f];
       return `${f.padEnd(6)} ${l.mode.padEnd(6)} err ${l.err.toFixed(3)}`;
     }),
-    s.gesture ? `<b>${s.gesture.idle ? 'idle' : 'gesture'}</b> ${s.gesture.name} t ${s.gesture.t.toFixed(2)}/${s.gesture.dur}` : '',
-    brain.st.status !== 'idle' ? `<b>brain</b> ${brain.st.status} ${brain.st.detail}` : '',
-    `R reset · \` debug · P pause`,
+    s.gesture ? `<b>${s.gesture.idle ? 'idle' : 'gesture'}</b> ${esc(s.gesture.name)} t ${s.gesture.t.toFixed(2)}/${s.gesture.dur}` : '',
+    brain.st.status !== 'idle' ? `<b>brain</b> ${esc(brain.st.status)} ${esc(brain.st.detail)}` : '',
+    DEV ? `R reset · \` debug · P pause` : '',
   ];
   return lines.join('\n');
 }

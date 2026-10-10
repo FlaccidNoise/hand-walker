@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { OBSTACLES, CELL, EXTENT, vertexH } from './terrain.js';
+import { ROOM } from './tuning.js';
 
 export function buildScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -119,7 +120,7 @@ export function rebuildGround() {
   // toward the fixed camera (+x+z). Walls are VISUAL ONLY — no sim collision (QA's
   // +x corridor runs "through" the east wall headlessly); the brain clamps every
   // walk target to the room instead, and that's the only control path there is.
-  const R = 5.5, WALL_H = 2.4, T = 0.18;
+  const R = ROOM.wall, WALL_H = 2.4, T = 0.18;
   const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b3450, roughness: 0.9, flatShading: true });
   const floor = new THREE.Mesh(new THREE.BoxGeometry(2 * R, 0.04, 2 * R), floorMat);
   floor.position.set(0, -0.018, 0);                          // top face at y≈0.002 over the flat ground

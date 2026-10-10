@@ -13,6 +13,7 @@
 // flatMask zeroes the field over the spawn disc and the +x QA corridor: qa.js
 // scenarios (origin spawn; runFast sweeps +x ~11u; spam random-walks ~±2u) must
 // keep measuring on flat ground or the gate baseline silently shifts.
+import { ROOM } from './tuning.js';
 
 export const CELL = 1.5;              // grid cell (u) — also the mesh facet size
 export const EXTENT = 30;             // mesh spans ±EXTENT in x and z
@@ -45,7 +46,7 @@ function vnoise(x, z, wavelen, salt) {  // smoothstep-interpolated value noise, 
 // 0 over the room square (±5.5 + walls), the spawn disc, and the +x QA corridor
 // (|z|<2.2, -1<x<16+margin), ramping to 1 over ~3u beyond them
 function flatMask(x, z) {
-  const dRoom = Math.max(Math.abs(x) - 6, Math.abs(z) - 6);
+  const dRoom = Math.max(Math.abs(x), Math.abs(z)) - (ROOM.wall + 0.5);
   const dDisc = Math.hypot(x, z) - 5;
   const dCorr = Math.max(Math.abs(z) - 2.2, -x - 1, x - 17);
   const d = Math.min(dRoom, dDisc, dCorr);
