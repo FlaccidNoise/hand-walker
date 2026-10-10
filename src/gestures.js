@@ -1,7 +1,8 @@
 // src/gestures.js — gesture pose-track definitions + sampler (buddy vocabulary).
 // A gesture: { dur, hover?: true, body?: {pitch,roll,height,lift: Track},
 //   splay?: {fingers,track},
-//   digits?: { finger: { base:{yaw,mcp,pip}, yaw?/mcp?/pip?: Track, win?:[u0,u1] } } }.
+//   digits?: { finger: { base:{yaw,mcp,pip} | 'rest', yaw?/mcp?/pip?: Track, win?:[u0,u1] } } }.
+// base 'rest' = the digit's own stance angles (tip on its rest spot at offset 0).
 // Track = [[u, value], ...], u in 0..1 of dur — smoothstep between keys, clamped at
 // the ends. Digit tracks add to base; u is re-normalized to the win window, and the
 // digit re-plants via a real swing when the window closes (main.js aloft-exit path).
@@ -48,6 +49,7 @@ function osc(cycles, amp, env) {
   return keys;
 }
 
+const TAP_LIFT = -0.35;                      // rad of MCP extension that lifts a tapping digit off its rest
 const CURL = { yaw: 0, mcp: 0, pip: 0.5 };   // lifted part-curled base (the "no" point)
 const WAVE_CURL = { yaw: 0, mcp: -0.25, pip: 0.65 };
 const WAVE_BOB = osc(2, 0.3);
@@ -121,14 +123,14 @@ export const GESTURES = {
     },
     digits: { index: { base: { yaw: 0, mcp: -0.3, pip: 0.7 }, pip: osc(3, 0.18), win: [0.05, 0.9] } },
   },
-  // impatient: index drums the ground (down-strokes push past stance into the
-  // ground constraint = the tap)
+  // impatient: index drums the ground. base 'rest' + a lift offset: offset 0 IS the
+  // tip on the floor, so every down-stroke strikes exactly, at any posture
   tap: {
     dur: 1.3,
-    digits: { index: { base: { yaw: 0, mcp: -0.1, pip: 1.1 },
-      mcp: [[0, 0], [0.08, -0.15], [0.16, 0.4], [0.22, 0.4], [0.3, -0.15],
-        [0.38, 0.4], [0.44, 0.4], [0.52, -0.15], [0.6, 0.4], [0.66, 0.4],
-        [0.74, -0.15], [0.82, 0.4], [0.88, 0.4], [1, 0]] } },
+    digits: { index: { base: 'rest',
+      mcp: [[0, 0], [0.08, TAP_LIFT], [0.16, 0], [0.22, 0], [0.3, TAP_LIFT],
+        [0.38, 0], [0.44, 0], [0.52, TAP_LIFT], [0.6, 0], [0.66, 0],
+        [0.74, TAP_LIFT], [0.82, 0], [0.88, 0], [1, 0]] } },
   },
   // hover: full liftoff, fist + one extended digit, big body roll (thumb swings
   // from its neutral lateral position to point up/down)
@@ -175,8 +177,8 @@ export const GESTURES = {
 
 // idles: subtle low-amplitude fidgets, weighted-random after IDLE_AFTER s without
 // input (see step()); same format, w = pick weight
-const DRUM_BASE = { yaw: 0, mcp: -0.1, pip: 1.1 };
-const DRUM_STROKE = [[0, 0], [0.3, -0.15], [0.55, 0.4], [0.7, 0.4], [1, 0]];
+const DRUM_BASE = 'rest';
+const DRUM_STROKE = [[0, 0], [0.3, TAP_LIFT], [0.55, 0], [0.7, 0], [1, 0]];
 const STRETCH = { yaw: 0, mcp: -0.35, pip: 0.5 };
 export const IDLES = {
   breathe: { w: 4, dur: 3.5, body: { height: osc(2, 0.015) } },

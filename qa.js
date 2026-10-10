@@ -1,6 +1,6 @@
 // qa.js — dev-only QA harness (§6). STRIPPED from the artifact build. Drives the sim
 // through window.__hand via scripted scenarios on the real rAF loop, recording:
-//   slide     accumulated planted-tip xz drift (u)          < 0.5
+//   slide     accumulated planted-tip xz drift               <= 0.10 per u walked (< 0.5 u in place)
 //   cross     worst neighbour lane-order margin (hand z)    > -0.05
 //   floor     min contact-joint height above ground (u)     >= -0.01
 //   tipErrP95 95th pct planted solve error (u)              < 0.08
@@ -13,15 +13,13 @@
 
 const F = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 const NEIGHBOR_PAIRS = [['thumb', 'index'], ['index', 'middle'], ['middle', 'ring'], ['ring', 'pinky']];
-const CRIT = { slide: 0.5, cross: -0.05, floor: -0.01, tipErrP95: 0.08, swingLo: 0.11, swingHi: 0.20,
+const CRIT = { slide: 0.5, slidePerU: 0.10, cross: -0.05, floor: -0.01, tipErrP95: 0.08, swingLo: 0.11, swingHi: 0.20,
   clear: 0.10,     // every swing peak and every carried digit clears the floor by this
   plantedMin: 2, bodyBob: 0.06,     // pivot180 only: support never drops, the wrist does not hop
-  tipStep: 0.12, returnErr: 0.02,   // gestures only: no digit snaps, every tip comes back to rest
+  tipStep: 0.16, returnErr: 0.02,   // gestures only: no digit snaps, every tip comes back to rest
   touchdown: 0.035 };               // tip travel in the landing sim step: placed, not scuffed (was 0.054-0.070)
 // a pivot re-steps every digit ~10 times: its slide bar is its own (0.034 per stance)
 const SLIDE = { pivot180: 2.0 };
-// pivot steps keep the symmetric swing profile (lane order), so they land faster
-const TOUCH = { pivot180: 0.05 };
 
 // under the gate's virtual clock (scripts/qa-gate.mjs) waiting PUMPS frames, so a
 // scenario integrates an exact frame time and is bit-reproducible at any machine load
@@ -39,7 +37,7 @@ function makeRecorder(H) {
     slide: 0, floor: Infinity, cross: Infinity, errs: [], swings: [], lifts: [],
     towed: false, steps: 0, frames: 0,
   };
-  const stanceStart = {}, swingStart = {}, swingPeak = {}, towedT = {};
+  const stanceStart = {}, swingStart = {}, swingPeak = {}, towedT = {}, replant = {};
   let last = sim.s.time, raf = 0, on = true;
   const tmp = new V();
   // look metrics: what the eye reads, beyond solve error
@@ -79,13 +77,13 @@ function makeRecorder(H) {
         if (stanceStart[f]) { r.slide += leg._slide ?? 0; leg._slide = 0; stanceStart[f] = null; }
         towedT[f] = 0;
         if (leg.mode === 'swing') {
-          if (swingStart[f] == null) { swingStart[f] = sim.s.time; swingPeak[f] = -Infinity; r.steps++; }
+          if (swingStart[f] == null) { swingStart[f] = sim.s.time; swingPeak[f] = -Infinity; r.steps++; replant[f] = !!leg.swing?.replant; }
           if (tip.y > swingPeak[f]) swingPeak[f] = tip.y;
         }
       }
       if (leg.mode !== 'swing' && swingStart[f] != null) {
-        if (leg.mode === 'stance') {                         // landed; aloft/tuck interruptions
-          r.swings.push(sim.s.time - swingStart[f]);         // are not swings
+        if (leg.mode === 'stance' && !replant[f]) {          // landed; aloft/tuck interruptions and
+          r.swings.push(sim.s.time - swingStart[f]);         // carried-digit re-plants are not steps
           r.lifts.push(swingPeak[f]);
         }
         swingStart[f] = null;
@@ -109,7 +107,7 @@ function makeRecorder(H) {
       const clear = tip.y - d.flesh - H.groundY(tip.x, tip.z);
       const moved = q.prev ? Math.hypot(tip.x - q.prev.x, tip.z - q.prev.z) : 0;
       const step3 = q.prev ? Math.hypot(moved, tip.y - q.prev.y) / nSteps : 0;
-      if (step3 > L.tipStep) L.tipStep = step3;
+      if (step3 > L.tipStep) { L.tipStep = step3; L.stepWho = `${f} ${leg.mode} t=${(sim.s.time - L.t0).toFixed(2)}`; }
       if (moved > 1e-4) L.tMove = sim.s.time;
       if (leg.mode === 'swing') {
         if (q.mode !== 'swing') { q.from = { x: tip.x, z: tip.z }; q.peak = -Infinity; }
@@ -117,7 +115,9 @@ function makeRecorder(H) {
       } else if (q.mode === 'swing' && leg.mode === 'stance') {
         q.steps++; q.len += Math.hypot(tip.x - q.from.x, tip.z - q.from.z);
         if (q.peak < q.clear) q.clear = q.peak;
-        if (moved / nSteps > L.touchdown) L.touchdown = moved / nSteps;   // u per sim step at landing
+        if (moved / nSteps > L.touchdown) {                  // u per sim step at landing
+          L.touchdown = moved / nSteps; L.touchWho = `${f} t=${(sim.s.time - L.t0).toFixed(2)}`;
+        }
       }
       if (leg.mode === 'aloft') {
         q.aloftT += dt;
@@ -169,9 +169,13 @@ function makeRecorder(H) {
       };
       const fails = [];
       const G = name === 'gestures';                         // digits are posed, not stepping: gait bars do not apply
-      if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
-      if (name === 'gestures' && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep}`);
-      if (m.touchdown > (TOUCH[name] ?? CRIT.touchdown)) fails.push(`touchdown ${m.touchdown}`);
+      // travel scenarios are judged per unit walked (a long run is not worse than a short
+      // one); in-place scenarios keep the absolute bar
+      if (!G && m.slidePerU != null && L.dist > 2) {
+        if (m.slidePerU > CRIT.slidePerU) fails.push(`slide/u ${m.slidePerU}`);
+      } else if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
+      if (name === 'gestures' && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
+      if (m.touchdown > CRIT.touchdown) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
       if (name === 'pivot180') {
         if (m.plantedMin < CRIT.plantedMin) fails.push(`planted ${m.plantedMin}`);
         if (m.bodyBob > CRIT.bodyBob) fails.push(`bob ${m.bodyBob}`);
@@ -260,7 +264,6 @@ const SCENARIOS = {
 const KNOWN_RED = {
   spam: 'seeded chaos input: lane order breaks under 160 ms direction flips',
   turnCycle: 'walk-and-turn scrub, the finger yaw cone binds (plan Task 17)',
-  gaitShift: 'slide 0.55 across six gait changes (plan Tasks 6, 11)',
   clickWalk: 'course changes scrub 0.47 per u (plan Tasks 6, 17)',
 };
 

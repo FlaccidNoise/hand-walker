@@ -360,10 +360,10 @@ function makeSim(rig, calib) {
       return;
     }
     // ease-OUT: the tip arrives with ~zero horizontal speed (smoothstep left the unfold
-    // racing the rate cap: 0.054 u per step at touchdown → 0.006). Pivot swings keep the
-    // symmetric profile and full fold: extended early, a rotating swing cuts across its
-    // neighbour's lane (cross -0.104 vs -0.021)
-    const t = sw.t, ease = sw.piv ? t * t * (3 - 2 * t) : 1 - (1 - t) ** 3;
+    // racing the rate cap: 0.054 u per step at touchdown → 0.006). Pivot swings use a
+    // softer ease-out and hold the fold longer: extended early, a rotating swing cuts
+    // across its neighbour's lane (cross -0.091 at cubic/0.6 vs +0.002 at quadratic/0.8)
+    const t = sw.t, ease = 1 - (1 - t) ** (sw.piv ? 2 : 3), fEnd = sw.piv ? C.FOLD_END_PIVOT : C.FOLD_END;
     const target = _b.lerpVectors(sw.from, sw.to, ease);
     target.y += C.GAITS[s.gait].arcH * Math.sin(Math.PI * t); // the ask; annulus is the cap (§5)
     const mcpW = d.mcp.getWorldPosition(_a);
@@ -373,8 +373,7 @@ function makeSim(rig, calib) {
     // fold is a liftoff pulse that ends by FOLD_END: the finger is extended for the
     // rest of the swing, so the unfold never races the rate cap into touchdown
     const fold = sw.rescue && t < C.RESCUE_HOLD ? 1
-      : sw.piv ? Math.sin(Math.PI * t)
-      : t < C.FOLD_END ? Math.sin(Math.PI * t / C.FOLD_END) : 0;
+      : t < fEnd ? Math.sin(Math.PI * t / fEnd) : 0;
     solveLegWorld(f, target, C.RATE_SWING, dt, fold, null, true);
     if (t >= 1) {                                            // pin stance at the ACHIEVED tip
       d.tip.getWorldPosition(leg.foot);
@@ -392,12 +391,15 @@ function makeSim(rig, calib) {
   // calib.aloft[f], the mildest curl MEASURED to clear the floor (see calibrate)
   // gesture digit: sample the finger's pose tracks (base + offsets, u re-normalized
   // to the win window) — one digit, its own local anatomical cone, no gait coupling
-  function gestureDigitPose(gd, u, win) {
-    const uu = (u - win[0]) / (win[1] - win[0]);
-    const pip = gd.base.pip + sampleTrack(gd.pip, uu);
-    return { yaw: gd.base.yaw + sampleTrack(gd.yaw, uu),
-      mcp: gd.base.mcp + sampleTrack(gd.mcp, uu),
-      pip, dip: M.clamp(pip * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
+  // base 'rest' = this digit's own stance angles: offset 0 puts the tip exactly on its
+  // rest spot, so taps STRIKE the floor at any posture instead of leaning on the
+  // ground constraint (which flipped the ring 0.46 u when the posture changed)
+  function gestureDigitPose(f, gd, u, win) {
+    const uu = (u - win[0]) / (win[1] - win[0]), b = gd.base === 'rest' ? restA[f] : gd.base;
+    const pip = b.pip + sampleTrack(gd.pip, uu);
+    return { yaw: b.yaw + sampleTrack(gd.yaw, uu),
+      mcp: b.mcp + sampleTrack(gd.mcp, uu),
+      pip, dip: M.clamp(pip * rig.digits[f].slave, C.LIMITS[2][0], C.LIMITS[2][1]) };
   }
   function poseLeg(f, pose, rate, dt) {
     const d = rig.digits[f], leg = legs[f];
@@ -594,7 +596,7 @@ function makeSim(rig, calib) {
       if (gdig) {                                              // gesture digit: lifted, bears no weight
         const u = s.gesture.t / s.gesture.dur, win = gdig.win ?? [0, 1];
         if (u >= win[0] && u < win[1]) {
-          leg.mode = 'gesture'; poseLeg(f, gestureDigitPose(gdig, u, win), C.RATE_CARRY, dt); continue;
+          leg.mode = 'gesture'; poseLeg(f, gestureDigitPose(f, gdig, u, win), C.RATE_CARRY, dt); continue;
         }
       }
       if (gd.aloft.includes(f) && s.speed > C.V_MOVE) {      // aloft only while moving (§4.7)
@@ -604,7 +606,7 @@ function makeSim(rig, calib) {
         const to = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // teleporting
         to.y = groundY(to.x, to.z) + padHeight(rig.digits[f]); // the foot dragged the tip
         leg.swing = { from: rig.digits[f].tip.getWorldPosition(new THREE.Vector3()),
-          to, t: 0, dur: 0.2, rescue: false };                // across at the rate cap (jank)
+          to, t: 0, dur: C.REPLANT_DUR, rescue: false, replant: true };   // across at the rate cap (jank)
         if (hovering()) {                                     // digits' window closed mid-hover: gear down
           leg.swing.a0 = { ...leg.angles };
           leg.swing.dur = C.HOVER_UNFURL * s.gesture.dur;
@@ -687,12 +689,22 @@ function calibrate(rig) {
   const tmp = new THREE.Vector3();
   const bellyFloor = rig.palmDepth + C.BELLY_CLEAR;          // lowest body height with the
                                                              // palm/stump off the ground
+  // POSTURE: the palm pitch is a chosen constant and EVERY scan below runs at it —
+  // lanes, rests, stand height and bands all describe the pose the hand really stands
+  // in. (Before: rests and stand height were derived level, then walked at a pitch
+  // picked by a band scan that stopped at -0.3.) Negative pitch = nose-down, stump up.
+  const PITCH = C.TUNE.walkPitch = DEV && new URLSearchParams(location.search).has('pitch')
+    ? +new URLSearchParams(location.search).get('pitch') : C.POSTURE_PITCH;
   const setPose = (h, walk) => {
     body.position.set(0, h, 0);
     body.rotation.order = 'YZX';
-    body.rotation.set(walk ? C.TUNE.walkRoll : 0, 0, walk ? C.TUNE.walkPitch : 0);
+    body.rotation.set(walk ? C.TUNE.walkRoll : 0, 0, PITCH);
     rig.root.updateMatrixWorld(true);
   };
+  // probe height for the lane and extension scans: the wrist height that puts the
+  // middle knuckle 0.47 u up (where it sat for the old level probe at 0.5)
+  setPose(1, false);
+  const hProbe = Math.max(1 + 0.47 - rig.digits.middle.mcp.getWorldPosition(tmp).y, bellyFloor + 0.02);
 
   const solveTo = (d, target) => {
     solveLeg(d, rig.root.worldToLocal(target.clone()), { root: rig.root });
@@ -712,7 +724,7 @@ function calibrate(rig) {
     const mcpW = rig.root.localToWorld(d.pos.mcp.clone());
     laneDir[f] = new THREE.Vector3(tipW.x - mcpW.x, 0, tipW.z - mcpW.z).normalize();
   }
-  setPose(Math.max(0.5, bellyFloor + 0.02), false);
+  setPose(hProbe, false);
   for (const f of FINGERS) {
     const d = rig.digits[f];
     const mcpW = d.mcp.getWorldPosition(tmp).clone();
@@ -734,7 +746,7 @@ function calibrate(rig) {
   // fraction of reach (slave coupling) — measure the largest extension the real
   // solver holds along each refined lane (the thumb holds ~0.88, fingers ~0.92)
   const restExt = {};
-  setPose(Math.max(0.5, bellyFloor + 0.02), false);
+  setPose(hProbe, false);
   for (const f of FINGERS) {
     const d = rig.digits[f];
     const mcpW = d.mcp.getWorldPosition(tmp).clone();
@@ -775,7 +787,7 @@ function calibrate(rig) {
   // wrist high; the pinky pins it) ---
   let standH = 0;
   const perDigitH = {};
-  for (let h = 1.20; h >= 0.20; h -= 0.002) {
+  for (let h = 2.20; h >= 0.20; h -= 0.002) {
     if (h < bellyFloor) break;                               // belly would rest on the floor
     const fts = restsAt(h);
     if (!fts) continue;
@@ -817,28 +829,6 @@ function calibrate(rig) {
       ?? null;
   };
   const walkH = Math.max(standH * C.POSE_CROUCH + C.POSE_SAG, bellyFloor);
-
-  // --- walk pitch ("set at rig time from bind geometry"): nose-up pitch about the
-  // wrist lifts the knuckle dome (MCPs sit forward of the wrist) and shifts knuckles
-  // forward of bind (§4.6). Read-only scan with the real solver (§8): keep the
-  // smallest pitch that maximizes the weakest digit's band at the walk pose. ---
-  let bestScore = -1;
-  const pitchScores = [];
-  for (let p = -0.3; p <= 0.4 + 1e-9; p += 0.05) {
-    C.TUNE.walkPitch = p;
-    let score = Infinity;
-    for (const f of FINGERS) {
-      const b = scanBand(f, walkH, 0.03);
-      score = Math.min(score, b ? b.hi - b.lo : 0);
-      if (score === 0) break;
-    }
-    pitchScores.push({ p, score });
-    if (score > bestScore) bestScore = score;
-  }
-  // flattest pitch within 90% of the best band score — the band-only optimum pegs
-  // nose-down and the hand walks slumped, dome dipping (looks matter: dome up)
-  C.TUNE.walkPitch = pitchScores.filter(s => s.score >= 0.9 * bestScore)
-    .reduce((a, b) => (Math.abs(b.p) < Math.abs(a.p) ? b : a)).p;
 
   const bands = {}, workC = {}, dMin = {};
   for (const f of FINGERS) {
