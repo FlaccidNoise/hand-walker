@@ -32,6 +32,8 @@ export const LIMITS = [
 export const DIP_SLAVE = 0.62;        // DIP anatomically slaved to PIP (~0.62·) (§4.2)
 export const THUMB_SLAVE = 0.5;       // thumb IP slaved to its MCP flexion (CMC-rooted chain)
 export const THUMB_CMC_EXT = -0.9;    // CMC extension range (~50°) — LIMITS[0] is finger-MCP anatomy
+export const THUMB_SWING_EXT = -1.3;  // unloaded (swing/aloft) the thumb retroposes further: at -0.9
+                                      // the CMC pins on its limit all swing and the tip scrapes (clear 0.04)
 // MCP ab/adduction yaw (§4.2): anatomical range (§7: fingers ±0.3, thumb ±0.65),
 // faded out near the knuckle where the lever shrinks (|t|/reach between LO and HI).
 export const YAW_MAX_FINGER = 0.3;
@@ -98,7 +100,9 @@ export const RIDE_TAU = 0.3;          // s — ride-height easing; an instant cr
 // --- Swing shaping (§4.6) ---
 export const LANE_CLAMP = 0.09;       // lane half-width, ·reach
 export const BAND_MARGIN = 0.03;      // keep landings this far inside the band edges
-export const FOLD_K = 0.6;            // rad of extra PIP curl at peak stepping fold
+// rad of extra PIP curl at peak stepping fold, per digit. Thumb 0: its swing already
+// rides the CMC extension limit with the PIP at max, and more fold pins the tip to the floor
+export const FOLD = { thumb: 0, index: 0.6, middle: 0.6, ring: 0.6, pinky: 0.6 };
 export const RESCUE_DUR = 0.16;       // s — rescue swings take at least this
 export const RESCUE_HOLD = 0.55;      // rescue holds the fold until t=0.55
 
@@ -110,6 +114,7 @@ export const RATE_PLANTED = 16;
 export const RATE_SWING = 18;
 export const RATE_CARRY = 7;           // aloft/tuck pose transitions — cosmetic, not steps;
                                        // at 18 rad/s the thumb visibly snapped (0.14u/frame)
+export const ALOFT_CLEAR = 0.14;       // u — carried digits hold their tip at least this far off the floor
 export const TUCK_MIN = 1.15;          // airborne legs never tuck below 1.15·standH
 
 // §5 stance rule: feet plant forward of the knuckles as descending diagonals — each

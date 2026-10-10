@@ -249,14 +249,15 @@ function makeSim(rig, calib) {
   // `branch` pins the elbow branch (stance stickiness — the thumb's oblique plane makes
   // the auto-selector's two candidates near-equal, and per-frame flip-flop wobbles the
   // planted tip); swings pass null and re-select freely (§4.2).
-  function solveLegWorld(f, targetW, rateCap, dt, fold = 0, branch = null) {
+  function solveLegWorld(f, targetW, rateCap, dt, fold = 0, branch = null, unloaded = false) {
     const d = rig.digits[f], leg = legs[f];
     const res = solveLeg(d, rig.root.worldToLocal(_a.copy(targetW)),
-      { root: rig.root, branch, sepBias: leg.sepBias || 0 });
+      { root: rig.root, branch, sepBias: leg.sepBias || 0,
+        mcpMin: unloaded && d.isThumb ? C.THUMB_SWING_EXT : undefined });
     leg.branch = res.branch;
     const a = { ...res.angles };
     if (fold > 0) {
-      a.pip = M.clamp(a.pip + C.FOLD_K * fold, C.LIMITS[1][0], C.LIMITS[1][1]);
+      a.pip = M.clamp(a.pip + C.FOLD[f] * fold, C.LIMITS[1][0], C.LIMITS[1][1]);
       a.dip = M.clamp(d.slave * a.pip, C.LIMITS[2][0], C.LIMITS[2][1]);
     }
     if (leg.angles && rateCap) {
@@ -347,7 +348,7 @@ function makeSim(rig, calib) {
     if (vm.length() < calib.dMin[f])                          // fold-annulus cap (§4.6)
       target.copy(mcpW).addScaledVector(vm.normalize(), calib.dMin[f]);
     const fold = sw.rescue && t < C.RESCUE_HOLD ? 1 : Math.sin(Math.PI * t);
-    solveLegWorld(f, target, C.RATE_SWING, dt, fold);
+    solveLegWorld(f, target, C.RATE_SWING, dt, fold, null, true);
     if (t >= 1) {                                            // pin stance at the ACHIEVED tip
       d.tip.getWorldPosition(leg.foot);
       leg.mode = 'stance';
@@ -360,9 +361,8 @@ function makeSim(rig, calib) {
     }
   }
 
-  // aloft (moving-gait thumb): carried lifted, bears no weight (§4.7). Mild curl —
-  // a deep tuck meant long, fast transitions every start/stop (the visible jank)
-  const ALOFT = { yaw: 0, mcp: -0.15, pip: 0.9, dip: M.clamp(0.9 * C.DIP_SLAVE, C.LIMITS[2][0], C.LIMITS[2][1]) };
+  // aloft (moving-gait thumb): carried lifted, bears no weight (§4.7) — the pose is
+  // calib.aloft[f], the mildest curl MEASURED to clear the floor (see calibrate)
   // gesture digit: sample the finger's pose tracks (base + offsets, u re-normalized
   // to the win window) — one digit, its own local anatomical cone, no gait coupling
   function gestureDigitPose(gd, u, win) {
@@ -555,7 +555,7 @@ function makeSim(rig, calib) {
         }
       }
       if (gd.aloft.includes(f) && s.speed > C.V_MOVE) {      // aloft only while moving (§4.7)
-        leg.mode = 'aloft'; poseLeg(f, ALOFT, C.RATE_CARRY, dt); continue;
+        leg.mode = 'aloft'; poseLeg(f, calib.aloft[f], C.RATE_CARRY, dt); continue;
       }
       if (leg.mode === 'aloft' || leg.mode === 'tuck' || leg.mode === 'gesture') { // re-plant via a REAL swing —
         const to = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // teleporting
@@ -851,13 +851,35 @@ function calibrate(rig) {
     d.yawZSign = Math.sign(d.tip.getWorldPosition(tmp).z - z0) || 1;
   }
 
+  // aloft pose per carried digit: the mildest lift+curl whose tip clears the floor by
+  // ALOFT_CLEAR at the walk pose AFTER the ground constraint. A fixed mild curl
+  // (mcp -0.15, pip 0.9) measured 0.000 clearance — the pad skimmed the floor all run.
+  const aloft = {};
+  setPose(walkH, true);
+  for (const f of new Set(C.GAIT_ORDER.flatMap(g => C.GAITS[g].aloft))) {
+    const d = rig.digits[f], lo = d.isThumb ? C.THUMB_SWING_EXT : C.LIMITS[0][0];
+    let best = 0;
+    scan: for (let mcp = -0.15; mcp >= lo - 1e-9; mcp -= 0.05)
+      for (let pip = 0.9; pip <= 1.6 + 1e-9; pip += 0.1) {
+        const a = { yaw: 0, mcp, pip, dip: M.clamp(pip * d.slave, C.LIMITS[2][0], C.LIMITS[2][1]) };
+        applyCurl(d, a);
+        rig.root.updateMatrixWorld(true);
+        groundConstrain(d, rig.root);
+        const clear = d.tip.getWorldPosition(tmp).y - padHeight(d);
+        best = Math.max(best, clear);
+        if (clear >= C.ALOFT_CLEAR) { aloft[f] = a; break scan; }
+      }
+    if (!aloft[f]) throw new Error(`calibrate: no aloft pose for ${f} clears ${C.ALOFT_CLEAR}u ` +
+      `(best ${best.toFixed(3)}) — widen the mcp/pip scan or lower ALOFT_CLEAR in tuning.js`);
+  }
+
   // settle: park at standH with every digit planted at its rest
   setPose(standH, false);
   const plantErr = {};
   for (const f of FINGERS) { rig.digits[f].yaw = 0; plantErr[f] = plantDigit(f); }
   // mean foot radius — the rotational term of the zero-slip cadence law (§4.5)
   const rFoot = FINGERS.reduce((sum, f) => sum + Math.hypot(feet[f].x, feet[f].z), 0) / FINGERS.length;
-  return { standH, walkH, perDigitH, plantErr, feet, laneZ, rFoot, bands, workC, dMin, strideMax, bandTable,
+  return { standH, walkH, perDigitH, plantErr, feet, laneZ, rFoot, bands, workC, dMin, strideMax, bandTable, aloft,
     // dev/debug handles (mutate the pose — probe use only)
     laneDir, restExt, restsAt, scanBand, solveTo, setPose, bellyFloor };
 }

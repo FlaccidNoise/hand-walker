@@ -6,12 +6,14 @@
 //   tipErrP95 95th pct planted solve error (u)              < 0.08
 //   swingDur  observed swing durations (s)                  in [0.11, 0.20]
 //   towed     any leg dragged planted at err>0.15 for >0.5s none
+//   clear     worst swing peak / carried-digit clearance (u)   >= 0.10
 // KNOWN_RED scenarios are allowed to fail (named, with the reason); every other one
 // must pass. The gate runs on a virtual clock, so results are bit-reproducible.
 
 const F = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 const NEIGHBOR_PAIRS = [['thumb', 'index'], ['index', 'middle'], ['middle', 'ring'], ['ring', 'pinky']];
-const CRIT = { slide: 0.5, cross: -0.05, floor: -0.01, tipErrP95: 0.08, swingLo: 0.11, swingHi: 0.20 };
+const CRIT = { slide: 0.5, cross: -0.05, floor: -0.01, tipErrP95: 0.08, swingLo: 0.11, swingHi: 0.20,
+  clear: 0.10 };   // every swing peak and every carried digit clears the floor by this
 
 // under the gate's virtual clock (scripts/qa-gate.mjs) waiting PUMPS frames, so a
 // scenario integrates an exact frame time and is bit-reproducible at any machine load
@@ -161,6 +163,9 @@ function makeRecorder(H) {
       if (m.swingMin != null && (m.swingMin < CRIT.swingLo - 0.01 || m.swingMax > CRIT.swingHi + 0.01))
         fails.push(`swingDur ${m.swingMin}-${m.swingMax}`);   // ±0.01: frame sampling quantum
       if (m.towed) fails.push('towed digit');
+      const low = F.filter(f => m.clear[f] != null && m.clear[f] < CRIT.clear);
+      if (low.length) fails.push(`clearance ${low.map(f => `${f} ${m.clear[f]}`).join(' ')}`);
+      if (m.aloftClear != null && m.aloftClear < CRIT.clear) fails.push(`aloft clearance ${m.aloftClear}`);
       return { metrics: m, fails, pass: fails.length === 0 };
     },
   };

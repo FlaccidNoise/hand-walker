@@ -130,7 +130,7 @@ function solveOnce(d, target, opts = {}) {
   };
   const mk = (s) => {
     const a = solveBranch(s);
-    a.mcp = M.clamp(a.mcp, d.mcpMin ?? C.LIMITS[0][0], C.LIMITS[0][1]);
+    a.mcp = M.clamp(a.mcp, opts.mcpMin ?? d.mcpMin ?? C.LIMITS[0][0], C.LIMITS[0][1]);
     a.pip = M.clamp(a.pip, C.LIMITS[1][0], C.LIMITS[1][1]);
     a.dip = M.clamp(d.slave * a.pip, C.LIMITS[2][0], C.LIMITS[2][1]); // DIP follows the CLAMPED pip
     return a;
