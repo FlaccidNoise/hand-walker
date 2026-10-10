@@ -212,10 +212,11 @@ export const IDLE_AFTER = 8;          // s sim since last input before idles sta
                                       // must exceed every QA quiet stretch (rest = 3 s)
 export const IDLE_GAP = 5;            // s sim between idles (±30% jitter)
 export const STATUS_HOLD = 3;          // s a 'saying' or 'error' status shows before the brain is idle again
-export const BEHAVE_AFTER = 30;       // s sim of USER quiet before brain-level idle
+export const POKE_FORGET = 10;        // s — pokes further apart than this start over at a giggle
+export const BEHAVE_AFTER = 14;       // s sim of USER quiet before brain-level idle
                                       // behaviors (wander/nap/…) — sim-level micro-idles
                                       // (IDLE_AFTER) fire much sooner and layer beneath
-export const BEHAVE_GAP = 35;         // s sim between behaviors (×0.7-1.5 jitter)
+export const BEHAVE_GAP = 10;         // s sim between behaviors (×0.7-1.5 jitter)
 export const BEHAVE_SIM_QUIET = 12;   // s sim with NO sim input before behaviors may fire —
                                       // must exceed every QA quiet stretch (~5 s max), or
                                       // behaviors contaminate the gate like idles would

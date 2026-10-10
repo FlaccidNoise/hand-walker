@@ -40,28 +40,74 @@ export function switchFlips(sw, hand) {
   return false;
 }
 
+// floor piano: a strip of keys laid along z. Which key is under a point, or -1.
+export const PIANO = { x0: -4.7, x1: -3.5, z0: -1.6, keyW: 0.4,
+  notes: [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25] };   // C major pentatonic: any run is a tune
+export function pianoKey(p, x, z) {
+  if (x < p.x0 || x > p.x1) return -1;
+  const i = Math.floor((z - p.z0) / p.keyW);
+  return i >= 0 && i < p.notes.length ? i : -1;
+}
+
 // ---- sound: WebAudio, lazy context, never throws into the sim ----
-let actx = null;
-function tone(parts, dur, gain = 0.2) {
+// `on` is set by the page on the first key or pointer press: browsers refuse audio
+// before that, and the headless gates never set it, so they stay silent and fast.
+export const audio = { on: false, muted: false };
+let actx = null, noise = null;
+const ctx = () => {
+  if (!audio.on || audio.muted) return null;
+  actx ??= new AudioContext();
+  if (actx.state === 'suspended') actx.resume();
+  return actx;
+};
+// decaying tone. `hold` s at full level first (a beep); `sweep` multiplies the pitch over dur (a drum)
+function tone(parts, dur, gain = 0.2, { hold = 0, sweep = 1 } = {}) {
   try {
-    actx ??= new AudioContext();
-    if (actx.state === 'suspended') actx.resume();
-    const t = actx.currentTime, g = actx.createGain();
-    g.gain.setValueAtTime(gain, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    g.connect(actx.destination);
-    for (const [f, a, type = 'sine'] of parts) {
-      const o = actx.createOscillator(), og = actx.createGain();
-      o.type = type; o.frequency.value = f; og.gain.value = a;
-      o.connect(og); og.connect(g); o.start(t); o.stop(t + dur + 0.05);
+    const a = ctx();
+    if (!a) return;
+    const t = a.currentTime, g = a.createGain();
+    g.gain.setValueAtTime(gain, t + hold);
+    g.gain.exponentialRampToValueAtTime(0.001, t + hold + dur);
+    g.connect(a.destination);
+    for (const [f, amp, type = 'sine'] of parts) {
+      const o = a.createOscillator(), og = a.createGain();
+      o.type = type; o.frequency.setValueAtTime(f, t); og.gain.value = amp;
+      if (sweep !== 1) o.frequency.exponentialRampToValueAtTime(f * sweep, t + hold + dur);
+      o.connect(og); og.connect(g); o.start(t); o.stop(t + hold + dur + 0.05);
     }
   } catch (e) { console.warn('[props] audio unavailable:', e?.message || e); }
 }
+// a short band of noise: a fingertip on the floor, a hi-hat
+function tick(freq, dur, gain) {
+  try {
+    const a = ctx();
+    if (!a) return;
+    if (!noise) {
+      noise = a.createBuffer(1, a.sampleRate * 0.2, a.sampleRate);
+      const d = noise.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t = a.currentTime, src = a.createBufferSource(), bp = a.createBiquadFilter(), g = a.createGain();
+    src.buffer = noise; bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.2;
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(bp); bp.connect(g); g.connect(a.destination); src.start(t); src.stop(t + dur + 0.02);
+  } catch (e) { console.warn('[props] audio unavailable:', e?.message || e); }
+}
+const STEP_HZ = { thumb: 700, index: 1500, middle: 1300, ring: 1600, pinky: 1900 };
+const BASS = [65.4, 65.4, 87.3, 98];                         // C C F G under the dance
+const beat = (i) => () => { tone([[150, 1]], 0.16, 0.5, { sweep: 0.3 }); tone([[BASS[i], 1, 'triangle']], 0.3, 0.22); };
 export const SOUNDS = {
   ding: () => tone([[1567, 1], [2349, 0.4]], 1.1, 0.22),     // small brass bell
   click: () => tone([[180, 1, 'square'], [2400, 0.5, 'square']], 0.05, 0.12),
   snap: () => tone([[2900, 1, 'triangle'], [1300, 0.6, 'square']], 0.035, 0.2),
   knock: () => tone([[140, 1], [90, 0.8]], 0.09, 0.35),
+  dit: () => tone([[660, 1]], 0.03, 0.14, { hold: 0.1 }),    // Morse: a dot is one unit of wall time
+  dah: () => tone([[660, 1]], 0.03, 0.14, { hold: 0.4 }),
+  hat: () => tick(7000, 0.04, 0.12),
+  beat0: beat(0), beat1: beat(1), beat2: beat(2), beat3: beat(3),
+  note: (hz) => tone([[hz, 1], [hz * 2, 0.25], [hz * 3, 0.08]], 1.2, 0.2),
+  step: (f, speed) => tick(STEP_HZ[f] ?? 1400, 0.03, 0.05 + 0.05 * Math.min(speed / 2, 1)),
 };
 
 // ---- the room's props ----
@@ -97,6 +143,18 @@ export function makeProps({ scene, lights }) {
   const rug = new THREE.Mesh(new THREE.CircleGeometry(1.0, 40), mat(0x6f4a5a, { roughness: 0.95 }));
   rug.rotation.x = -Math.PI / 2; rug.position.set(-3.5, 0.008, -3.5); rug.receiveShadow = true; scene.add(rug);
 
+  // floor piano along the west wall: a fingertip landing on a key plays it (`footfall`)
+  const pianoG = new THREE.Group(), keys = [];
+  for (let i = 0; i < PIANO.notes.length; i++) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(PIANO.x1 - PIANO.x0, 0.02, PIANO.keyW - 0.04),
+      mat(0xe6dfcc, { roughness: 0.35, emissive: 0xffc070, emissiveIntensity: 0 }));
+    m.position.set((PIANO.x0 + PIANO.x1) / 2, 0.003, PIANO.z0 + (i + 0.5) * PIANO.keyW);
+    m.receiveShadow = true; pianoG.add(m); keys.push({ m, glow: 0 });
+  }
+  scene.add(pianoG);
+  const zLo = PIANO.z0 - 0.5, zHi = PIANO.z0 + PIANO.notes.length * PIANO.keyW + 0.5, xMid = (PIANO.x0 + PIANO.x1) / 2;
+  let handZ = 0;                                              // the piano is played from the nearer end
+
   const state = { lights: true, level: 1, ringT: -1 };
   const axis = new THREE.Vector3();
   // `plan`: what the hand does once it stands at `anchor` facing `facing` (world heading, rad)
@@ -106,6 +164,13 @@ export function makeProps({ scene, lights }) {
     bell: { label: 'bell', mesh: bellG, anchor: { x: -3.2, z: 3.2 }, plan: () => [{ do: 'jump' }] },
     ball: { label: 'ball', mesh: ballM, get anchor() { return { x: ball.x, z: ball.z }; }, speed: C.SPEED.scuttle, plan: () => [] },
     rug: { label: 'rug', mesh: rug, anchor: { x: -3.5, z: -3.5 }, plan: () => [{ do: 'gesture', name: 'sleep' }] },
+    // walk the length of the keys and back: the gait is the tune
+    piano: { label: 'floor piano', mesh: pianoG,
+      get anchor() { return { x: xMid, z: handZ < (zLo + zHi) / 2 ? zLo : zHi }; },
+      plan() {
+        const a = this.anchor.z === zLo ? zLo : zHi, b = a === zLo ? zHi : zLo;
+        return [{ do: 'walkTo', x: xMid, z: b, speed: C.SPEED.strut }, { do: 'walkTo', x: xMid, z: a, speed: C.SPEED.scuttle }, { do: 'gesture', name: 'bow' }];
+      } },
   };
   const fire = {
     switch() { state.lights = !state.lights; toggle.rotation.x = state.lights ? 0 : 0.5; SOUNDS.click(); },
@@ -115,7 +180,18 @@ export function makeProps({ scene, lights }) {
   return {
     ids: Object.keys(P), get: (id) => P[id], state, fire: (id) => fire[id] && fire[id](),
     // sensed props + animation. hand = { x, y, z, vx, vz, airborne }
+    // a fingertip came down at (x, z): a piano key plays its note, the bare floor ticks
+    footfall(f, x, z, speed) {
+      const i = pianoKey(PIANO, x, z);
+      if (i < 0) return SOUNDS.step(f, speed);
+      keys[i].glow = 1; SOUNDS.note(PIANO.notes[i]);
+    },
     update(dt, hand, landed) {
+      handZ = hand.z;
+      for (const k of keys) if (k.glow > 0) {
+        k.glow = Math.max(0, k.glow - dt / 0.5);
+        k.m.material.emissiveIntensity = 0.9 * k.glow; k.m.position.y = 0.003 - 0.008 * k.glow;
+      }
       if (switchFlips(sw, hand)) fire.switch();
       if (bellRings({ x: -3.2, z: 3.2, r: 0.9 }, hand, landed)) fire.bell();
       stepBall(ball, dt, hand);
@@ -144,6 +220,6 @@ export function makeProps({ scene, lights }) {
       return best;
     },
     // for the LLM prompt: what is here and what state it is in
-    describe: () => `Things in the room (use them with {"do":"use","target":ID}): switch = the light switch, you jump to flip it (lights are ${state.lights ? 'ON' : 'OFF'}); bell = a desk bell, you jump on it to ring it; ball = a ball, you run into it to kick it; rug = your nap rug.`,
+    describe: () => `Things in the room (use them with {"do":"use","target":ID}): switch = the light switch, you jump to flip it (lights are ${state.lights ? 'ON' : 'OFF'}); bell = a desk bell, you jump on it to ring it; ball = a ball, you run into it to kick it; rug = your nap rug; piano = a floor piano, you walk along the keys to play it.`,
   };
 }

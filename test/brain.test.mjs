@@ -106,3 +106,34 @@ test('with no LLM reachable, an unknown request shrugs and says what works', asy
   assert.equal(called, 0);
   delete globalThis.fetch;
 });
+
+test('pokes escalate from a giggle to a sulk, and are forgotten after a quiet spell', () => {
+  const m = mock();
+  const first = () => { const a = m.brain.st.plan[0]; return a.name ?? a.do; };
+  const seen = [];
+  for (let i = 0; i < 5; i++) { m.brain.poke(); seen.push(first()); m.step(0.6); }
+  assert.deepEqual(seen, ['laugh', 'jump', 'no', 'tap', 'flipBird']);
+  m.brain.poke(); m.step(0.6); m.brain.poke();
+  assert.equal(first(), 'jump', 'two quick pokes: the second startles');
+  m.brain.cancel(); m.step(C.POKE_FORGET + 1);
+  m.brain.poke();
+  assert.equal(first(), 'laugh', 'a poke after a quiet spell is a giggle again');
+});
+
+test('a routine expands to plain actions, and an unknown one fails loudly', () => {
+  const m = mock();
+  assert.equal(m.brain.command([{ do: 'routine', name: 'dance' }], { source: 'click' }), true);
+  assert.ok(m.brain.st.plan.length > 3 && m.brain.st.plan.every(a => a.do !== 'routine'));
+  assert.equal(m.brain.command([{ do: 'routine', name: 'moonwalk' }], { source: 'click' }), false);
+  assert.match(m.brain.st.detail, /unknown routine "moonwalk" — have: dance/);
+});
+
+test('morse taps the asked text, and text with no code fails loudly', () => {
+  const m = mock();
+  m.brain.command([{ do: 'morse', text: 'hi' }], { source: 'voice' });
+  m.step(0.05);
+  assert.deepEqual(m.calls.at(-1), ['gesture', 'morse']);
+  m.brain.command([{ do: 'morse', text: '!!' }], { source: 'voice' });
+  m.step(0.05);
+  assert.match(m.brain.st.detail, /no Morse code|has a Morse code/);
+});

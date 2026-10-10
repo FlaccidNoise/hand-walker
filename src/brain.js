@@ -7,7 +7,7 @@
 // stops, pivots and goes for any command more than TURN_PIVOT off the heading.
 import * as C from './tuning.js';
 import * as M from './math.js';
-import { GESTURES } from './gestures.js';
+import { GESTURES, morseGesture } from './gestures.js';
 import { parseRules, isQuestion } from './rules.js';
 import { makeLocalLLM, LOCAL_MODEL } from './llm.js';
 
@@ -63,6 +63,17 @@ export function makeBrain(sim, rig, camera, props = null) {
       if (!a.started) {
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
         if (!sim.gesture(a.name)) throw `unknown gesture "${a.name}"`;
+        a.started = true; return RUNNING;
+      }
+      return sim.s.gesture ? RUNNING : DONE;
+    },
+    morse(a) {                                           // tap `text` out in real Morse
+      if (!a.started) {
+        if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;
+        const def = morseGesture(a.text ?? 'sos');
+        if (!def) throw `nothing in "${a.text}" has a Morse code — use letters or digits`;
+        GESTURES.morse = def;
+        if (!sim.gesture('morse')) return RUNNING;       // busy: try again next tick
         a.started = true; return RUNNING;
       }
       return sim.s.gesture ? RUNNING : DONE;
@@ -123,16 +134,35 @@ export function makeBrain(sim, rig, camera, props = null) {
     wait: (a) => (a.s ?? 1) + 1,
     jump: () => 5,
     gesture: (a) => (GESTURES[a.name]?.dur ?? 4) + 4,      // sleep is 16s — dur-aware
+    morse: (a) => (morseGesture(a.text ?? 'sos')?.dur ?? 4) + 4,
     walk: (a) => 8 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // includes a lead-in pivot
     walkTo: (a) => a.tmo ?? 30,
     turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
     face: () => 8,
   };
 
+  // routines: named bits made of plain actions. {do:'routine',name} expands in run().
+  const FRONT = { x: 3.6, z: 3.6 };                      // the open corner nearest the viewer
+  const toViewer = () => camera ? Math.atan2(-(camera.position.z - FRONT.z), camera.position.x - FRONT.x) : -Math.PI / 4;
+  const ROUTINES = {
+    // a hop-turn is the spin: dance, spin, dance, spin back, bow
+    dance: () => [{ do: 'gesture', name: 'dance' }, { do: 'turn', deg: 180 }, { do: 'gesture', name: 'dance' },
+      { do: 'turn', deg: 180 }, { do: 'jump' }, { do: 'gesture', name: 'bow' }],
+    // come to the glass, rap on it, and wave at whoever is there
+    knock: () => [{ do: 'walkTo', ...FRONT, speed: C.SPEED.scuttle }, { do: 'face', heading: toViewer() },
+      { do: 'gesture', name: 'knock' }, { do: 'wait', s: 0.4 }, { do: 'gesture', name: 'wave' }],
+    // offended: one rude sign, then off to the far corner to sulk with its back turned
+    sulk: () => [{ do: 'gesture', name: 'flipBird' }, { do: 'walkTo', x: -4, z: -4, speed: C.SPEED.scuttle },
+      { do: 'face', heading: Math.PI * 0.75 }, { do: 'wait', s: 2 }],
+  };
+
   function run(plan, tag = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
     plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
+    let noRoutine = null;
+    plan = plan.flatMap(a => a.do !== 'routine' ? [a] : ROUTINES[a.name] ? ROUTINES[a.name]() : (noRoutine = a.name, []));
+    if (noRoutine) { fail(`unknown routine "${noRoutine}" — have: ${Object.keys(ROUTINES).join(', ')}`); return false; }
     // {do:'use',target}: go to the prop's anchor, face it, then do what the prop asks for
     let unknown = null;
     plan = plan.flatMap(a => {
@@ -171,6 +201,19 @@ export function makeBrain(sim, rig, camera, props = null) {
   }
   const cancel = () => { owner = 'auto'; stop(); };
 
+  // ---- poked (a click on the hand itself): ticklish, then startled, then cross.
+  // The count decays, so an occasional poke is always a giggle.
+  const POKES = [[{ do: 'gesture', name: 'laugh' }], [{ do: 'jump' }], [{ do: 'gesture', name: 'no' }],
+    [{ do: 'gesture', name: 'tap' }], [{ do: 'routine', name: 'sulk' }]];
+  let pokes = 0, pokedAt = -1e9;
+  function poke() {
+    if (bClock - pokedAt > C.POKE_FORGET) pokes = 0;
+    pokedAt = bClock;
+    const ok = command(POKES[pokes], { source: 'click' });
+    pokes = (pokes + 1) % POKES.length;
+    return ok;
+  }
+
   // ---- idle behaviors: compound plans when the USER goes quiet. Tracks its own
   // user-inactivity clock — the sim's lastInput is useless here because the
   // behaviors' own autoWalk/gesture calls stamp it.
@@ -192,6 +235,14 @@ export function makeBrain(sim, rig, camera, props = null) {
     { name: 'visiting the step', w: 2, plan: () => [
       { do: 'walkTo', x: 0, z: 2.4, speed: 0.6 }, { do: 'wait', s: rnd(1, 2) },
       { do: 'gesture', name: 'thinking' } ] },
+    // the room is there to be played with
+    { name: 'playing the piano', w: 3, plan: () => [{ do: 'use', target: 'piano' }] },
+    { name: 'chasing the ball', w: 3, plan: () => [{ do: 'use', target: 'ball' }, { do: 'wait', s: 0.6 }, { do: 'use', target: 'ball' }] },
+    { name: 'ringing the bell', w: 2, plan: () => [{ do: 'use', target: 'bell' }, { do: 'gesture', name: 'laugh' }] },
+    { name: 'knocking on the glass', w: 3, plan: () => [{ do: 'routine', name: 'knock' }] },
+    { name: 'dancing', w: 2, plan: () => [{ do: 'routine', name: 'dance' }] },
+    { name: 'signalling', w: 1, plan: () => [{ do: 'morse', text: 'sos' }, { do: 'gesture', name: 'point' }] },
+    { name: 'lights out', w: 1, plan: () => [{ do: 'use', target: 'switch' }, { do: 'use', target: 'rug' }, { do: 'use', target: 'switch' }] },
   ];
   let lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER;
   function behave(name) {                                 // also a headless test hook
@@ -236,13 +287,15 @@ export function makeBrain(sim, rig, camera, props = null) {
 
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
-- {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest")
+- {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive, snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
 - {"do":"walkTo","x":X,"z":Z,"speed":S} — walk to a WORLD position in your room (preferred for going places). "speed" (u/s): ~0.8 relaxed default, ~1.6 jog, ~3-3.4 FULL SPRINT — sprint when told to hurry/run/race or when excited.
 - {"do":"walk","forward":F,"right":R,"speed":S} — walk a relative offset in YOUR body frame (for "back up a bit", "come closer"); negative allowed. You end up facing your travel direction.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
 - {"do":"jump"}
 - {"do":"wait","s":S}
 - {"do":"use","target":ID} — go to a thing in the room and use it (the state line lists them)
+- {"do":"morse","text":"SOS"} — tap a SHORT word (8 characters at most) on the floor in real Morse code
+- {"do":"routine","name":N} — a set piece: dance (music, spins, a bow), knock (come to the glass, rap on it, wave), sulk (a rude sign, then off to the corner)
 Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT — you speak in a dry, warm, upper-class British gentleman's voice, so phrase accordingly ("Right then", "I should think so", "Terribly sorry"). Only use say when a gesture cannot carry the answer.
 YOUR ROOM (a diorama the user looks into from a FIXED camera): floor spans x,z from -${C.ROOM.half} to ${C.ROOM.half}. Solid walls on the west (-x) and north (-z) sides; the north wall has a doorway at (0,-4.5). The south/east sides are open, facing the viewer. Named spots: center (0,0); the little step (0, 2.4) — you can climb on it; back corner (-4,-4); doorway (0,-4.2); front-right corner (4,4) — nearest the viewer.
 SCREEN DIRECTIONS (camera never moves): screen-right = toward +x,-z; screen-left = toward -x,+z; toward the viewer = +x,+z; away = -x,-z. Use these when the user says left/right/closer/back.
@@ -376,6 +429,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal,
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke,
+    get idle() { return st.i < 0 && st.status === 'idle'; },
     get needsLocal() { return llmDown && local.supported && !local.ready; } };
 }

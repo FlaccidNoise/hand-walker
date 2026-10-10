@@ -4,13 +4,31 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Hand Walker</title>
+<link rel="icon" href="data:," />
 <style>
   html,body { margin:0; height:100%; background:#0c1018; overflow:hidden; font:13px/1.4 ui-monospace,monospace; color:#d8dce6; }
   #app { position:fixed; inset:0; }
   #hud { position:fixed; left:8px; top:8px; pointer-events:none; white-space:pre; text-shadow:0 1px 2px #000; }
   #hud b { color:#8fe0ff; }
-  #help { position:fixed; right:8px; bottom:8px; opacity:.7; text-align:right; }
-  #talk { position:fixed; left:50%; bottom:10px; transform:translateX(-50%); display:flex; gap:10px; align-items:center; background:#141a26cc; border:1px solid #2a3346; border-radius:8px; padding:8px 12px; }
+  #help { position:fixed; right:8px; top:8px; opacity:.7; text-align:right; pointer-events:none; }
+  #dock { position:fixed; left:50%; bottom:10px; transform:translateX(-50%); display:flex; flex-direction:column; gap:8px; align-items:center; width:max-content; max-width:calc(100vw - 16px); }
+  #keys { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+  #keys button { background:#141a26cc; color:#d8dce6; border:1px solid #2a3346; border-radius:999px; padding:5px 11px; font:inherit; cursor:pointer; }
+  #keys button:hover { background:#22304a; border-color:#3a4a6a; }
+  #keys button:focus-visible, #brainBtn:focus-visible, #talkText:focus-visible { outline:2px solid #8fe0ff; outline-offset:1px; }
+  #keys #muteBtn { opacity:.75; }
+  #talk { display:flex; gap:10px; align-items:center; background:#141a26cc; border:1px solid #2a3346; border-radius:8px; padding:8px 12px; max-width:100%; box-sizing:border-box; }
+  @media (max-height:500px) {                 /* a phone on its side: keep the room in view */
+    #help, #talkText { display:none; }
+    #dock { gap:4px; bottom:6px; }
+    #talk { padding:3px 10px; background:none; border:none; }
+    #talkState { min-width:0; }
+  }
+  @media (max-width:760px) {
+    #help { display:none; }
+    #talk { flex-wrap:wrap; justify-content:center; }
+    #talkState { min-width:0; text-align:center; flex-basis:100%; }
+  }
   #talkState { min-width:220px; }
   #talkState.err { color:#ff8f8f; }
   #brainBtn { background:#22304a; color:#d8dce6; border:1px solid #3a4a6a; border-radius:4px; padding:4px 8px; font:inherit; cursor:pointer; }
@@ -21,11 +39,24 @@
 <body>
 <div id="app"></div>
 <div id="hud"></div>
-<div id="help">click the floor: walk there · double-click: sprint<br>WASD: walk · Shift: scuttle · Q E: turn · Space: jump<br>1–0: wave yes no shrug laugh bow thumbs-up peace snap double-snap (works the lights)<br>click the switch, bell, ball or rug to use it<br>hold V: talk · ` debug</div>
-<div id="talk">
-  <span id="talkState">hold V to talk</span>
-  <input id="talkText" placeholder="…or type a command" autocomplete="off" />
-  <button id="brainBtn" hidden>load brain (340 MB)</button>
+<div id="help">click the floor: walk there · double-click: sprint<br>click the switch, bell, ball, rug or piano to use it<br>click the hand to poke it · rest the cursor and it looks<br>WASD: walk · Shift: scuttle · Q E: turn · Space: jump<br>1–0: wave yes no shrug laugh bow thumbs-up peace snap double-snap<br>hold V: talk · M: sound · ` debug</div>
+<div id="dock">
+  <div id="keys">
+    <button data-say="wave">wave</button>
+    <button data-say="dance">dance</button>
+    <button data-say="play the piano">piano</button>
+    <button data-say="knock">knock</button>
+    <button data-say="morse sos">morse</button>
+    <button data-say="high five">high five</button>
+    <button data-say="double snap">lights</button>
+    <button data-say="play dead">play dead</button>
+    <button id="muteBtn" aria-pressed="false">sound on</button>
+  </div>
+  <div id="talk">
+    <span id="talkState">hold V to talk</span>
+    <input id="talkText" placeholder="…or type: say hi in morse" autocomplete="off" aria-label="Type a command for the hand" />
+    <button id="brainBtn" hidden>load brain (340 MB)</button>
+  </div>
 </div>
 <script>
   // early error capture (before module loads) for diagnostics

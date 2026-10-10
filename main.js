@@ -8,7 +8,7 @@ import { groundY } from './src/terrain.js';
 import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
 import { makeBrain } from './src/brain.js';
 import { initInput } from './src/input.js';
-import { makeProps, SOUNDS } from './src/props.js';
+import { makeProps, SOUNDS, audio } from './src/props.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import { digitRatio, strideBudget, digitDuty } from './src/gait.js';
@@ -27,7 +27,7 @@ const state = {
 };
 
 async function init() {
-  const { renderer, scene, camera, controls, lights } = buildScene(app);
+  const { renderer, scene, camera, camHome, controls, lights } = buildScene(app);
   const dbg = new DebugDraw(scene);
   dbg.visible = false;
 
@@ -53,7 +53,20 @@ async function init() {
   const props = makeProps({ scene, lights });
   const brain = makeBrain(sim, rig, camera, props);
   // gesture cues: sounds, and the double snap that works any `remote` prop from afar
-  sim.onCue = (name) => { if (name === 'remote') props.fire('switch'); else if (SOUNDS[name]) SOUNDS[name](); };
+  let shake = 0;                                             // camera shake, 1 → 0 (a knock on the glass)
+  sim.onCue = (name) => {
+    if (name === 'remote') props.fire('switch');
+    else if (SOUNDS[name]) SOUNDS[name]();
+    if (name === 'knock') shake = 1;
+  };
+  sim.onStep = (f, foot) => props.footfall(f, foot.x, foot.z, sim.s.speed);
+  // sound starts with the first key or pointer press (browsers refuse it before that)
+  const hear = () => { audio.on = true; };
+  addEventListener('pointerdown', hear, { once: true });
+  addEventListener('keydown', hear, { once: true });
+  const muteBtn = document.getElementById('muteBtn');
+  const setMute = (m) => { audio.muted = m; muteBtn.textContent = m ? 'sound off' : 'sound on'; muteBtn.setAttribute('aria-pressed', String(m)); };
+  muteBtn.addEventListener('click', () => setMute(!audio.muted));
 
   const __hand = {
     rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES, props,
@@ -73,6 +86,7 @@ async function init() {
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
+    if (k === 'm' && e.target.tagName !== 'INPUT') setMute(!audio.muted);
     if (DEV && k === 'p') state.paused = !state.paused;
     if (DEV && k === 'r') { brain.stop(); sim.reset(); }
   });
@@ -81,19 +95,25 @@ async function init() {
   const talkState = document.getElementById('talkState');
   const talkText = document.getElementById('talkText');
   const setTalk = (msg, err = false) => { talkState.textContent = msg; talkState.className = err ? 'err' : ''; };
+  // a touch screen has no V key to hold: say what works there
+  const TOUCH = matchMedia('(pointer: coarse)').matches;
+  const TALK_IDLE = TOUCH ? 'tap the floor, the hand, or a button' : 'hold V to talk';
+  setTalk(TALK_IDLE);
   // the in-browser model downloads only after this button is pressed (it is the consent)
   const brainBtn = document.getElementById('brainBtn');
   brainBtn.addEventListener('click', () => { brainBtn.hidden = true; brain.loadLocal(); });
   brain.st.onstatus = (st) => {
-    setTalk(st.status === 'idle' ? 'hold V to talk' : `${st.status} ${st.detail}`, st.status === 'error');
+    setTalk(st.status === 'idle' ? TALK_IDLE : `${st.status} ${st.detail}`, st.status === 'error');
     brainBtn.hidden = !brain.needsLocal;
   };
+  // the buttons say their line through the same door as typing and speech
+  for (const b of document.querySelectorAll('#keys [data-say]')) b.addEventListener('click', () => { brain.ask(b.dataset.say); b.blur(); });
   talkText.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Enter' && talkText.value.trim()) { brain.ask(talkText.value.trim()); talkText.value = ''; }
   });
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) setTalk('no speech recognition in this browser — type a command below', true);
+  if (!SR) { if (!TOUCH) setTalk('no speech recognition in this browser — type a command below', true); }
   else {
     let rec = null, transcript = '', micErr = false;
     addEventListener('keydown', (e) => {
@@ -109,7 +129,7 @@ async function init() {
       rec.onerror = (ev) => { micErr = true; setTalk(`mic error: ${ev.error}`, true); };
       rec.onend = () => {
         if (transcript) brain.ask(transcript);
-        else if (!micErr && brain.st.status === 'idle') setTalk('hold V to talk');
+        else if (!micErr && brain.st.status === 'idle') setTalk(TALK_IDLE);
       };
       rec.start();
       setTalk('listening: …');
@@ -144,11 +164,15 @@ async function init() {
     }
     input.update(dt);
     if (controls.enabled) controls.update();                 // fixed diorama camera; orbit is debug-only
+    else if (shake > 0) {                                    // a knock rattles the view for a moment
+      shake = Math.max(0, shake - dt / 0.22);
+      camera.position.set(camHome.x + 0.05 * shake * Math.sin(clock.elapsedTime * 95), camHome.y + 0.04 * shake * Math.sin(clock.elapsedTime * 71), camHome.z);
+    }
     renderer.render(scene, camera);
     if (state.debug) drawDebug(dbg, rig, sim);
     frames++; fpsT += dt;
     if (fpsT > 0.5) {
-      hud.innerHTML = devHUD(frames / fpsT, rig, sim, calib, brain);
+      hud.innerHTML = DEV || state.debug ? devHUD(frames / fpsT, rig, sim, calib, brain) : '';   // numbers are a dev view
       frames = 0; fpsT = 0;
     }
   }
@@ -425,6 +449,7 @@ function makeSim(rig, calib) {
       d.tip.getWorldPosition(leg.foot);
       // a footfall twitches the body: a nod, and a lean toward the side that landed
       kick(-C.STEP_KICK, C.STEP_KICK * 1.4 * Math.sign(calib.feet[f].z));
+      if (sim.onStep && !sw.replant) sim.onStep(f, leg.foot);
       leg.mode = 'stance';
       leg.swing = null;
       leg.err = 0;    // vs the pinned foot — a stale swing-target err re-triggered settles
@@ -787,7 +812,7 @@ function makeSim(rig, calib) {
     s.airborne = true;
   }
 
-  const sim = { s, legs, step, reset, autoWalk, jump, bandAt, gesture, pivot, onCue: null };
+  const sim = { s, legs, step, reset, autoWalk, jump, bandAt, gesture, pivot, onCue: null, onStep: null };
   return sim;
 }
 

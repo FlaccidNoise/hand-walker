@@ -38,6 +38,14 @@ const clamp = (v) => Math.max(-C.ROOM.half, Math.min(C.ROOM.half, v));
 function clause(t, pos) {
   if (/\b(don'?t|do not|never)\b/.test(t)) return null;      // do not invert a negation by keyword
   if (/\b(stop|halt|stay|freeze|whoa|hold still)\b/.test(t)) return [];
+  if (/\b(morse|tap out|spell)\b/.test(t)) {                // "say hello in morse", "tap out sos"
+    const text = t.replace(/\b(say|spell|tap|out|in|morse|code|for|please|me|something|it)\b/g, '').replace(/[^a-z0-9]/g, '');
+    return [{ do: 'morse', text: text.slice(0, 8) || 'sos' }];
+  }
+  if (/\b(play dead|drop dead|die|bang)\b/.test(t)) return [{ do: 'gesture', name: 'playDead' }];
+  if (/\b(dance|boogie|party|groove)\b/.test(t)) return [{ do: 'routine', name: 'dance' }];
+  if (/\b(knock|get my attention)\b/.test(t)) return [{ do: 'routine', name: 'knock' }];
+  if (/\b(piano|music|tune|song)\b/.test(t)) return [{ do: 'use', target: 'piano' }];
   if (/\b(sleep|nap|rest|go to bed|rug)\b/.test(t)) return [{ do: 'use', target: 'rug' }];
   if (/\b(lights?|switch|dark|bright)\b/.test(t)) return [{ do: 'use', target: 'switch' }];
   if (/\b(bell|ring|ding)\b/.test(t)) return [{ do: 'use', target: 'bell' }];

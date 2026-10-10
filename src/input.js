@@ -2,7 +2,9 @@
 // plan executor voice and idle behaviors use, so every input gets the same turn
 // policy, arrival and stop.
 //   click floor      walk there (near = strut, far = scuttle, double-click = sprint)
-//   click a prop     go and use it (light switch, bell, ball, rug)
+//   click a prop     go and use it (light switch, bell, ball, rug, piano)
+//   click the hand   poke it: it giggles, then jumps, then loses patience
+//   rest the cursor  the hand turns and points at it, and comes over if it stays
 //   WASD / arrows    walk, camera-relative (hold Shift to scuttle); release = stop
 //   Q / E            pivot 45° left / right        Space  jump
 //   1-9, 0           emotes
@@ -14,6 +16,9 @@ const DOUBLE_CLICK = 350;           // ms
 const CARROT = 1.5;                 // u — keys aim a walk target this far ahead
 const KEY_REFRESH = 0.1;            // s between carrot updates while a direction is held
 export const EMOTE_KEYS = ['wave', 'yes', 'no', 'idk', 'laugh', 'bow', 'thumbsUp', 'peace', 'snap', 'doubleSnap'];
+const POKE_R = 0.6;                 // u — a click this close to the hand's middle is a poke
+const NOTICE_AFTER = 1.6;           // s the cursor rests on the floor before the hand looks
+const COME_AFTER = 5;               // s more before it walks over
 const DIRS = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1],
   KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 
@@ -26,12 +31,32 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
   marker.rotation.x = -Math.PI / 2;
   scene.add(marker);
   let markerT = 1, lastClick = -1e9;
-
-  renderer.domElement.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || controls.enabled) return;         // debug orbit owns the pointer
+  const aim = (e) => {
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, camera);
+  };
+  const palm = new THREE.Vector3();
+  const onHand = () => {                                      // wrist and middle knuckle bracket the palm
+    rig.digits.middle.mcp.getWorldPosition(palm).add(body).multiplyScalar(0.5);
+    return ray.ray.distanceToPoint(palm) < POKE_R;
+  };
+  // the resting cursor: where it is on the floor, how long it has been still, what the hand has done about it
+  const cur = { on: false, x: 0, z: 0, still: 0, stage: 0 };
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || controls.enabled) return;
+    aim(e);
+    if (!ray.ray.intersectPlane(floor, hit) || Math.abs(hit.x) > half || Math.abs(hit.z) > half) { cur.on = false; return; }
+    if (!cur.on || Math.hypot(hit.x - cur.x, hit.z - cur.z) > 0.25) { cur.x = hit.x; cur.z = hit.z; cur.still = 0; cur.stage = 0; }
+    cur.on = true;
+  });
+  renderer.domElement.addEventListener('pointerleave', () => { cur.on = false; });
+
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || controls.enabled) return;         // debug orbit owns the pointer
+    aim(e);
+    cur.still = 0; cur.stage = 2;                             // a click is an answer: stop noticing until the cursor moves
+    if (onHand()) { brain.poke(); return; }
     const prop = props.pick(ray);                             // a click on a prop uses it
     if (prop) { brain.command([{ do: 'use', target: prop }], { source: 'click' }); return; }
     if (!ray.ray.intersectPlane(floor, hit)) return;
@@ -62,6 +87,24 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
   addEventListener('keyup', (e) => held.delete(e.code));
   addEventListener('blur', () => held.clear());
 
+  // cursor awareness: an idle hand looks at a cursor that rests on its floor, and
+  // walks over if it stays. Runs as an `auto` command, so any real input replaces it.
+  function notice(dt) {
+    if (!cur.on || cur.stage > 1 || !brain.idle) { if (!brain.idle) cur.still = 0; return; }
+    cur.still += dt;
+    const dx = cur.x - body.x, dz = cur.z - body.z, d = Math.hypot(dx, dz);
+    if (d < 1) return;                                        // on top of the hand: that is a poke, not a look
+    const heading = Math.atan2(-dz, dx);
+    if (cur.stage === 0 && cur.still > NOTICE_AFTER) {
+      cur.stage = 1; cur.still = 0;
+      brain.command([{ do: 'face', heading }, { do: 'gesture', name: 'point' }], { source: 'auto', tag: 'noticing you' });
+    } else if (cur.stage === 1 && cur.still > COME_AFTER) {
+      cur.stage = 2;
+      brain.command([{ do: 'walkTo', x: cur.x - dx / d * 0.9, z: cur.z - dz / d * 0.9, speed: C.SPEED.strut },
+        { do: 'gesture', name: 'tap' }], { source: 'auto', tag: 'coming to see' });
+    }
+  }
+
   const fwd = new THREE.Vector3();
   function update(dt, shift) {
     if (markerT < 1) {                                        // click marker fades out
@@ -69,6 +112,7 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
       marker.material.opacity = 0.7 * (1 - markerT);
       marker.scale.setScalar(1 + 0.5 * markerT);
     }
+    notice(dt);
     let dx = 0, dz = 0;
     for (const k of held) { dx += DIRS[k][0]; dz += DIRS[k][1]; }
     if (!dx && !dz) {

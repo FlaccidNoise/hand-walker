@@ -42,3 +42,13 @@ test('the switch flips once per jump, only beneath it and only at height', () =>
   assert.equal(switchFlips(sw, hand({ airborne: true, y: 2.0, x: 3 })), false, 'not beneath it');
   assert.equal(switchFlips(sw, hand({ airborne: true, y: 2.0 })), true);
 });
+
+test('a point on the piano strip maps to its key, and off the strip to none', async () => {
+  const { pianoKey, PIANO } = await import('../src/props.js');
+  const xm = (PIANO.x0 + PIANO.x1) / 2;
+  assert.equal(pianoKey(PIANO, xm, PIANO.z0 + 0.01), 0);
+  assert.equal(pianoKey(PIANO, xm, PIANO.z0 + PIANO.keyW * 7.5), 7);
+  assert.equal(pianoKey(PIANO, xm, PIANO.z0 - 0.01), -1);
+  assert.equal(pianoKey(PIANO, xm, PIANO.z0 + PIANO.keyW * 8.01), -1);
+  assert.equal(pianoKey(PIANO, PIANO.x1 + 0.01, PIANO.z0 + 0.2), -1);
+});

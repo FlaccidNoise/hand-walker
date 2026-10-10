@@ -5,6 +5,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { OBSTACLES, CELL, EXTENT, vertexH } from './terrain.js';
 import { ROOM } from './tuning.js';
 
+const FIT_ASPECT = 1.3;              // width / height below which the room no longer fits the view
+
 export function buildScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -58,14 +60,25 @@ export function buildScene(container) {
   const ground = rebuildGround();
   scene.add(ground.group);
 
+  // a narrow window (a phone held upright) crops the room's sides at this field of
+  // view: back the camera off along its line of sight until the room fits again
+  const camHome = camera.position.clone(), eye = camHome.clone().sub(controls.target);
+  const frame = () => {
+    const k = Math.max(1, FIT_ASPECT / camera.aspect);
+    camHome.copy(controls.target).addScaledVector(eye, k);
+    scene.fog.near = 8 * k; scene.fog.far = 40 * k;          // the fog keeps its place in the room
+    if (!controls.enabled) camera.position.copy(camHome);
+  };
+  frame();
   const onResize = () => {
     const w = container.clientWidth, h = container.clientHeight;
     camera.aspect = w / h; camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    frame();
   };
   window.addEventListener('resize', onResize);
 
-  return { renderer, scene, camera, controls, ground, pmrem, lights: { hemi, key, amb }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
+  return { renderer, scene, camera, camHome, controls, ground, pmrem, lights: { hemi, key, amb }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
 }
 
 // ground: low-poly terrain mesh built by sampling terrain.js's vertexH on the SAME

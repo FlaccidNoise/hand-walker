@@ -51,3 +51,17 @@ test('questions are detected', () => {
   assert.ok(isQuestion('you ok?'));
   assert.ok(!isQuestion('wave at me'));
 });
+
+test('morse, routines, the piano and playing dead', () => {
+  assert.deepEqual(parseRules('say hello in morse'), [{ do: 'morse', text: 'hello' }]);
+  assert.deepEqual(parseRules('tap out SOS'), [{ do: 'morse', text: 'sos' }]);
+  assert.deepEqual(parseRules('morse code'), [{ do: 'morse', text: 'sos' }]);
+  assert.equal(one('spell supercalifragilistic in morse').text.length, 8);
+  assert.deepEqual(parseRules('dance'), [{ do: 'routine', name: 'dance' }]);
+  assert.deepEqual(parseRules('knock on the glass'), [{ do: 'routine', name: 'knock' }]);
+  assert.deepEqual(parseRules('play the piano'), [{ do: 'use', target: 'piano' }]);
+  assert.deepEqual(parseRules('play dead'), [{ do: 'gesture', name: 'playDead' }]);
+  assert.ok(GESTURES.playDead && GESTURES.dance && GESTURES.knock);
+  assert.deepEqual(parseRules('play with the ball'), [{ do: 'use', target: 'ball' }]);
+  assert.equal(one('tap').name, 'tap', 'a bare tap is still the impatient drum');
+});

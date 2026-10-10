@@ -40,7 +40,7 @@ try {
     for (let i = 0, n = Math.round(ms * hz / 1000); i < n; i++) window.__vframe(1000 / hz);
   }, ms, HZ);
   await page.evaluate(() => {
-    for (const id of ['hud', 'help', 'talk', 'keys']) { const e = document.getElementById(id); if (e) e.style.display = 'none'; }
+    for (const id of ['hud', 'help', 'dock']) { const e = document.getElementById(id); if (e) e.style.display = 'none'; }
     window.__hand.reset();
   });
   await pump(1500);
