@@ -9,6 +9,7 @@ import * as C from './tuning.js';
 import * as M from './math.js';
 import { GESTURES } from './gestures.js';
 import { parseRules, isQuestion } from './rules.js';
+import { makeLocalLLM, LOCAL_MODEL } from './llm.js';
 
 const RUNNING = 0, DONE = 1;
 
@@ -241,9 +242,30 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     if (plan) { command(plan, { source: 'voice' }); return { plan }; }
     if (noModel) {
       command([{ do: 'gesture', name: 'idk' }], { source: 'voice' });
-      setStatus('saying', 'No language model on this page. Try: wave, go to the door, turn around, jump, take a nap.');
+      const how = local.ready ? 'I did not follow that.'
+        : local.supported ? `No language model yet: press "load brain" (${LOCAL_MODEL.size}, runs in this browser).`
+        : 'No language model on this page.';
+      setStatus('saying', `${how} Try: wave, go to the door, turn around, jump, take a nap.`);
     }
     return null;
+  }
+  // the in-browser model (src/llm.js): the LLM for a static host. Loaded on request only.
+  const local = makeLocalLLM((msg) => setStatus('thinking', msg));
+  async function loadLocal() {
+    try { await local.load(); setStatus('saying', 'Brain loaded. Ask me anything.'); return true; }
+    catch (e) { setStatus('error', `in-browser brain: ${e.message || e}`); return false; }
+  }
+  async function askLocal(text, gen, rules) {
+    setStatus('thinking', text);
+    let plan = null;
+    try {
+      plan = isQuestion(text) ? [{ do: 'gesture', name: await local.answer(text) }]
+        : await local.plan(text, body.position);
+    } catch (e) {
+      if (gen === askGen) setStatus('error', `in-browser brain: ${e.message || e}`);
+      return null;
+    }
+    return gen === askGen ? obey(plan ?? rules, true) : null;
   }
   let askGen = 0;                                        // a newer ask() retires every older reply
   async function ask(text) {
@@ -254,7 +276,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     // anything the rules do not cover go to the LLM, when one is reachable.
     const rules = parseRules(text, body.position);
     if (rules && !isQuestion(text)) return obey(rules);
-    if (llmDown) return obey(rules, true);
+    if (llmDown) return local.ready ? askLocal(text, gen, rules) : obey(rules, true);
     setStatus('thinking', text);
     history.push({ role: 'user', parts: [{ text: `${stateLine()} ${text}` }] });
     while (history.length > 12) history.shift();
@@ -274,7 +296,10 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     } catch (e) {
       if (gen !== askGen) return null;
       // a static host answers /llm with a 404 page: no model here, and no point asking again
-      if (e instanceof SyntaxError || e instanceof TypeError) { llmDown = true; return obey(rules, true); }
+      if (e instanceof SyntaxError || e instanceof TypeError) {
+        llmDown = true;
+        return local.ready ? askLocal(text, gen, rules) : obey(rules, true);
+      }
       setStatus('error', e.name === 'AbortError' ? 'brain timed out (20s)' : String(e.message || e));
       return null;
     }
@@ -325,5 +350,6 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel };
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal,
+    get needsLocal() { return llmDown && local.supported && !local.ready; } };
 }

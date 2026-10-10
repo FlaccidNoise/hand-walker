@@ -77,8 +77,13 @@ async function init() {
   const talkState = document.getElementById('talkState');
   const talkText = document.getElementById('talkText');
   const setTalk = (msg, err = false) => { talkState.textContent = msg; talkState.className = err ? 'err' : ''; };
-  brain.st.onstatus = (st) =>
+  // the in-browser model downloads only after this button is pressed (it is the consent)
+  const brainBtn = document.getElementById('brainBtn');
+  brainBtn.addEventListener('click', () => { brainBtn.hidden = true; brain.loadLocal(); });
+  brain.st.onstatus = (st) => {
     setTalk(st.status === 'idle' ? 'hold V to talk' : `${st.status} ${st.detail}`, st.status === 'error');
+    brainBtn.hidden = !brain.needsLocal;
+  };
   talkText.addEventListener('keydown', (e) => {
     e.stopPropagation();
     if (e.key === 'Enter' && talkText.value.trim()) { brain.ask(talkText.value.trim()); talkText.value = ''; }

@@ -13,6 +13,7 @@
   #talk { position:fixed; left:50%; bottom:10px; transform:translateX(-50%); display:flex; gap:10px; align-items:center; background:#141a26cc; border:1px solid #2a3346; border-radius:8px; padding:8px 12px; }
   #talkState { min-width:220px; }
   #talkState.err { color:#ff8f8f; }
+  #brainBtn { background:#22304a; color:#d8dce6; border:1px solid #3a4a6a; border-radius:4px; padding:4px 8px; font:inherit; cursor:pointer; }
   #talkText { background:#0c1018; color:#d8dce6; border:1px solid #2a3346; border-radius:4px; padding:4px 8px; width:220px; font:inherit; }
   canvas { display:block; }
 </style>
@@ -24,6 +25,7 @@
 <div id="talk">
   <span id="talkState">hold V to talk</span>
   <input id="talkText" placeholder="…or type a command" autocomplete="off" />
+  <button id="brainBtn" hidden>load brain (340 MB)</button>
 </div>
 <script>
   // early error capture (before module loads) for diagnostics
