@@ -97,13 +97,13 @@ async function init() {
   const setTalk = (msg, err = false) => { talkState.textContent = msg; talkState.className = err ? 'err' : ''; };
   // a touch screen has no V key to hold: say what works there
   const TOUCH = matchMedia('(pointer: coarse)').matches;
-  const TALK_IDLE = TOUCH ? 'tap the floor, the hand, or a button' : 'hold V to talk';
-  setTalk(TALK_IDLE);
+  let talkIdle = TOUCH ? 'tap the floor, the hand, or a button' : 'hold V to talk';
+  setTalk(talkIdle);
   // the in-browser model downloads only after this button is pressed (it is the consent)
   const brainBtn = document.getElementById('brainBtn');
   brainBtn.addEventListener('click', () => { brainBtn.hidden = true; brain.loadLocal(); });
   brain.st.onstatus = (st) => {
-    setTalk(st.status === 'idle' ? TALK_IDLE : `${st.status} ${st.detail}`, st.status === 'error');
+    setTalk(st.status === 'idle' ? talkIdle : `${st.status} ${st.detail}`, st.status === 'error');
     brainBtn.hidden = !brain.needsLocal;
   };
   // the buttons say their line through the same door as typing and speech
@@ -115,9 +115,17 @@ async function init() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { if (!TOUCH) setTalk('no speech recognition in this browser — type a command below', true); }
   else {
-    let rec = null, transcript = '', micErr = false;
+    let rec = null, transcript = '', micErr = false, micBlocked = false;
+    // a host can switch the microphone off for the whole page (a Permissions-Policy
+    // header): then V cannot work, so do not offer it
+    navigator.permissions?.query({ name: 'microphone' }).then((p) => {
+      if (p.state !== 'denied') return;
+      micBlocked = true;
+      if (!TOUCH) { talkIdle = 'type a command, or use the buttons'; if (brain.st.status === 'idle') setTalk(talkIdle); }
+    }).catch(() => {});                                      // no such permission name here: V stays on offer
     addEventListener('keydown', (e) => {
       if (e.code !== 'KeyV' || e.repeat || e.target === talkText || rec) return;
+      if (micBlocked) { setTalk('the microphone is blocked on this page: type a command', true); return; }
       e.preventDefault();
       transcript = ''; micErr = false;
       rec = new SR();
@@ -129,7 +137,7 @@ async function init() {
       rec.onerror = (ev) => { micErr = true; setTalk(`mic error: ${ev.error}`, true); };
       rec.onend = () => {
         if (transcript) brain.ask(transcript);
-        else if (!micErr && brain.st.status === 'idle') setTalk(TALK_IDLE);
+        else if (!micErr && brain.st.status === 'idle') setTalk(talkIdle);
       };
       rec.start();
       setTalk('listening: …');
