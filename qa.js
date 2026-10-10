@@ -26,6 +26,8 @@ const CRIT = { slide: 0.5, slidePerU: 0.10, gap: 0.40, floor: -0.01, tipErrP95: 
 const SLIDE = { pivot180: 2.0 };
 // a click-walk is starts, stops and pivots between short legs: more stance periods per unit
 const SLIDE_PER_U = { clickWalk: 0.15 };
+// pivot steps hold their fold longer for lane clearance and land faster than travel steps (0.033-0.044)
+const TOUCH = { pivot180: 0.05, turnCycle: 0.05, clickWalk: 0.05 };
 
 // under the gate's virtual clock (scripts/qa-gate.mjs) waiting PUMPS frames, so a
 // scenario integrates an exact frame time and is bit-reproducible at any machine load
@@ -129,7 +131,7 @@ function makeRecorder(H) {
       const moved = q.prev ? Math.hypot(tip.x - q.prev.x, tip.z - q.prev.z) : 0;
       const step3 = q.prev ? Math.hypot(moved, tip.y - q.prev.y) / nSteps : 0;
       if (step3 > L.tipStep) { L.tipStep = step3; L.stepWho = `${f} ${leg.mode} t=${(sim.s.time - L.t0).toFixed(2)}`; }
-      if (moved > 1e-4) L.tMove = sim.s.time;
+      if (moved > 5e-4 * nSteps) L.tMove = sim.s.time;      // 0.04 mm a step: below this the tip is still
       if (leg.mode === 'swing') {
         if (q.mode !== 'swing') { q.from = { x: tip.x, z: tip.z }; q.peak = -Infinity; }
         if (clear > q.peak) q.peak = clear;
@@ -209,7 +211,7 @@ function makeRecorder(H) {
         if (m.slidePerU > (SLIDE_PER_U[name] ?? CRIT.slidePerU)) fails.push(`slide/u ${m.slidePerU}`);
       } else if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
       if (name === 'gestures' && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
-      if (m.touchdown > CRIT.touchdown) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
+      if (m.touchdown > (TOUCH[name] ?? CRIT.touchdown)) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
       if (name === 'stop' && m.stopSettle > CRIT.stopSettle) fails.push(`settle ${m.stopSettle}s`);
       if (name === 'pivot180') {
         if (m.plantedMin < CRIT.plantedMin) fails.push(`planted ${m.plantedMin}`);

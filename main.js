@@ -162,9 +162,12 @@ function makeSim(rig, calib) {
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', gaitT: 0, phase: 0, f: 0, vEff: 0, speed: 0, planted: 0,
     airborne: false, replant: false, time: 0,
+    spr: { pitch: { x: 0, v: 0 }, roll: { x: 0, v: 0 } },
     gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, turnWait: 0, hop: null, rng: 1,
   };
   // seeded LCG: the sim core replays exactly (Math.random broke that after 8 s idle)
+  let stopKick = false;
+  const kick = (pitch, roll) => { s.spr.pitch.v += pitch; s.spr.roll.v += roll; };
   const rand = () => (s.rng = (s.rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 
   // --- per-gait derived params (§4.5/§4.7): stride budget, per-digit duty ratio, top speed ---
@@ -233,7 +236,8 @@ function makeSim(rig, calib) {
   const applyBodyPose = () => {
     const g = gesturePose();
     body.rotation.order = 'YZX';
-    body.rotation.set(C.TUNE.walkRoll + g.roll, s.heading + g.heading, C.TUNE.walkPitch + g.pitch);
+    body.rotation.set(C.TUNE.walkRoll + g.roll + s.spr.roll.x, s.heading + g.heading,
+      C.TUNE.walkPitch + g.pitch + s.spr.pitch.x);
     rig.root.updateMatrixWorld(true);
   };
   // how far a planted foot sits from its rest spot under the body (ground plane)
@@ -407,6 +411,8 @@ function makeSim(rig, calib) {
     solveLegWorld(f, target, C.RATE_SWING, dt, fold, null, true);
     if (t >= 1) {                                            // pin stance at the ACHIEVED tip
       d.tip.getWorldPosition(leg.foot);
+      // a footfall twitches the body: a nod, and a lean toward the side that landed
+      kick(-C.STEP_KICK, C.STEP_KICK * 1.4 * Math.sign(calib.feet[f].z));
       leg.mode = 'stance';
       leg.swing = null;
       leg.err = 0;    // vs the pinned foot — a stale swing-target err re-triggered settles
@@ -567,6 +573,17 @@ function makeSim(rig, calib) {
     const rideT = gY + Math.max(cmdSpeed > C.V_MOVE ? calib.standH * C.POSE_CROUCH : calib.standH,
       rig.palmDepth + C.BELLY_CLEAR);
     s.rideH += (rideT - s.rideH) * (1 - Math.exp(-dt / C.RIDE_TAU)); // eased — no stop-pop
+    // body secondary motion: two damped springs carry twitches (kick()): a nod per
+    // footfall, a lean into a start, one nod as a stop bites. The body still rides level
+    // and the fingers do the work. Planted tips do not move: the stance solve absorbs it.
+    // (A/B'd and dropped for costing grip: a ride-height bob per lifted digit, slide
+    // +10-30% and stop settle 0.56 → 1.35 s; lean into acceleration, run slide +25%.)
+    if (stopKick && s.speed < C.V_MOVE) { stopKick = false; kick(C.STOP_KICK, 0); }
+    if (cmdSpeed > C.V_MOVE) stopKick = true;
+    for (const q of [s.spr.pitch, s.spr.roll]) {
+      q.v += (-C.BODY_K * q.x - C.BODY_C * q.v) * dt;         // semi-implicit Euler: stable at SIM_DT
+      q.x += q.v * dt;
+    }
     // gesture height rides OUTSIDE the ease: RIDE_TAU smears a snappy shrug flat;
     // the support spring is the physical smoother
     const rideH = s.rideH + gesturePose().height;
@@ -594,7 +611,7 @@ function makeSim(rig, calib) {
     if (hovering() || s.replant) { body.position.y = gY + calib.standH + gesturePose().lift; s.vy = 0; }
     else body.position.y += s.vy * dt;
     if (s.airborne && s.vy <= 0 && body.position.y <= gY + calib.standH) {
-      s.airborne = false; s.vy *= 0.1;                       // touchdown; springs absorb the rest
+      s.airborne = false; s.vy *= C.LAND_KEEP;               // touchdown: the stance spring takes the rest (squash)
       if (s.hop) { s.heading = s.hop.to; s.hop = null; }
       applyBodyPose(); reseedFeet();
     }
@@ -629,6 +646,7 @@ function makeSim(rig, calib) {
       // cadence floor: a slow walk takes shorter steps at a natural beat instead of
       // holding a swing in the air for seconds (and a start steps at once)
       const starting = s.f === 0;
+      if (starting && s.pivotTarget == null) kick(-C.GO_KICK, 0);   // lean into the first step
       s.f = Math.min(Math.max(f, C.F_MIN), gd.fMax);
       s.vEff = v;
       // decisive, repeatable start: enter the cycle at the gait's own entry phase, so
@@ -722,6 +740,7 @@ function makeSim(rig, calib) {
     s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
     s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null; s.turnWait = 0; s.hop = null;
     s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
+    s.spr.pitch.x = s.spr.pitch.v = s.spr.roll.x = s.spr.roll.v = 0; stopKick = false;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();
     for (const f of FINGERS) {
