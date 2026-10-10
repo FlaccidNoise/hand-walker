@@ -158,7 +158,7 @@ function makeSim(rig, calib) {
     vy: 0, heading: 0, yawRate: 0,
     gait: 'walk', gaitT: 0, phase: 0, f: 0, vEff: 0, speed: 0, planted: 0,
     airborne: false, replant: false, time: 0,
-    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, rng: 1,
+    gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, turnWait: 0, rng: 1,
   };
   // seeded LCG: the sim core replays exactly (Math.random broke that after 8 s idle)
   const rand = () => (s.rng = (s.rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
@@ -239,6 +239,8 @@ function makeSim(rig, calib) {
   };
   // jump the (unwrapped, monotonic) phase forward to fraction `want` of a cycle
   const enterPhase = (want) => { s.phase = Math.floor(s.phase) + want + (s.phase % 1 > want ? 1 : 0); };
+  // every digit down and on its rest spot (a pivot starts from the stance, not mid-stride)
+  const settled = () => FINGERS.every(f => legs[f].mode === 'stance' && offRest(f) <= C.SETTLE_TOL);
   const dutyEff = () => 1 - Math.min(0.9,
     Math.max(1 - C.GAITS[s.gait].duty, C.SWING_MIN * s.f)); // 0.11 s swing floor (§4.5)
   // this digit's share of the cycle on the ground at the current speed and cadence
@@ -462,27 +464,40 @@ function makeSim(rig, calib) {
   function step(dt) {
     s.time += dt;
     // ramp the command toward its target at CMD_ACCEL — see tuning.js
-    const dcx = s.cmdT.x - s.cmd.x, dcz = s.cmdT.z - s.cmd.z;
+    // TURN POLICY (every input path gets it): a commanded direction more than TURN_PIVOT
+    // off the heading means stop, pivot, go. Steering a walking hand through a big turn
+    // sweeps planted feet out of the finger-yaw cone and they scrub; the pivot does not.
+    const wantHd = s.cmdT.x !== 0 || s.cmdT.z !== 0 ? Math.atan2(-s.cmdT.z, s.cmdT.x) : null;
+    if (wantHd != null && !s.airborne && !s.gesture
+        && (s.pivotTarget != null || Math.abs(M.wrapAngle(wantHd - s.heading)) > C.TURN_PIVOT))
+      s.pivotTarget = wantHd;                                 // (tracks the command while turning)
+    const hold = s.pivotTarget != null;                       // translate only once the turn is done
+    const dcx = (hold ? 0 : s.cmdT.x) - s.cmd.x, dcz = (hold ? 0 : s.cmdT.z) - s.cmd.z;
     // slowing is not leg-limited the way speeding up is (no foot is stranded behind a
     // body that stops), so a stop ramps at STOP_DECEL: hard stops, staccato
-    const braking = Math.hypot(s.cmdT.x, s.cmdT.z) < Math.hypot(s.cmd.x, s.cmd.z);
+    const braking = hold || Math.hypot(s.cmdT.x, s.cmdT.z) < Math.hypot(s.cmd.x, s.cmd.z);
     const dcl = Math.hypot(dcx, dcz), dcMax = (braking ? C.STOP_DECEL : C.CMD_ACCEL) * dt;
     if (dcl > dcMax) { s.cmd.x += dcx / dcl * dcMax; s.cmd.z += dcz / dcl * dcMax; }
-    else { s.cmd.x = s.cmdT.x; s.cmd.z = s.cmdT.z; }
+    else { s.cmd.x = hold ? 0 : s.cmdT.x; s.cmd.z = hold ? 0 : s.cmdT.z; }
     const cmdSpeed = Math.hypot(s.cmd.x, s.cmd.z);
 
     // --- steering ---
     if (s.airborne) s.pivotTarget = null;                    // a jump interrupts a pivot
     if (s.pivotTarget != null) {                              // pivot-in-place: decoupled from
       const err = M.wrapAngle(s.pivotTarget - s.heading);     // the cmdSpeed gate below — turns
-      if (Math.abs(err) < C.PIVOT_DONE_EPS) { s.pivotTarget = null; s.yawRate = 0; }
+      if (Math.abs(err) < C.PIVOT_DONE_EPS) { s.pivotTarget = null; s.yawRate = 0; s.turnWait = 0; }
+      else if (s.speed > C.V_MOVE || (s.yawRate === 0 && !settled() && (s.turnWait += dt) < C.TURN_WAIT))
+        s.yawRate = 0;                                        // still braking or stepping home: the turn waits
       else {
         const want = M.clamp(C.PIVOT_GAIN * err, -C.PIVOT_YAW_MAX, C.PIVOT_YAW_MAX);
         s.yawRate += M.clamp(want - s.yawRate, -C.PIVOT_ACCEL * dt, C.PIVOT_ACCEL * dt);
       }
     } else if (cmdSpeed > C.V_MOVE && !s.airborne) {
+      // under way, steer only as fast as planted feet can follow: ARC_SWEEP rad of
+      // hand-frame arc per stance. Small corrections stay smooth; big ones pivot (above)
       const hd = Math.atan2(-s.cmd.z, s.cmd.x);
-      s.yawRate = M.clamp(C.STEER_GAIN * M.wrapAngle(hd - s.heading), -C.YAW_RATE_MAX, C.YAW_RATE_MAX);
+      const cap = Math.min(C.YAW_RATE_MAX, C.ARC_SWEEP * Math.max(s.f, C.F_MIN) / dutyEff());
+      s.yawRate = M.clamp(C.STEER_GAIN * M.wrapAngle(hd - s.heading), -cap, cap);
     } else s.yawRate *= Math.exp(-6 * dt);
     s.heading = M.wrapAngle(s.heading + s.yawRate * dt);
 
@@ -688,7 +703,7 @@ function makeSim(rig, calib) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
-    s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null;
+    s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null; s.turnWait = 0;
     s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();

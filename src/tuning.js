@@ -64,6 +64,9 @@ export const V_MAX = 3.4;             // u/s leash top — raised from 2.6: at 2
                                       // couldn't tell run from walk; verify slide at 3.4
                                       // via probe (QA runFast still commands 2.5)
 
+// the three speeds the command layer asks for: near targets strut, far targets scuttle
+export const SPEED = { strut: 0.8, scuttle: 1.8, sprint: 3.2 };
+
 // --- Speed crossover V_MOVE: aloft only active while speed > this ---
 export const V_MOVE = 0.15;
 
@@ -104,6 +107,9 @@ export const MIN_PLANTED = { walk: 2, trot: 1, run: 1 };   // a swing may not st
 export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lower gait's vTop exactly (§4.7)
 
 // --- Steering / cadence ---
+export const TURN_PIVOT = 0.35;       // rad — a command further than this off the heading stops and pivots first
+export const TURN_WAIT = 0.6;         // s — longest a pivot waits for the feet to step home before it starts anyway
+export const ARC_SWEEP = 0.1;         // rad — arc a planted foot may sweep per stance while steering under way
 export const STEER_GAIN = 6;          // yaw-rate gain toward the commanded heading (1/s)
 export const YAW_RATE_MAX = 0.8;      // rad/s — 0.35 predates the polished solver and felt
                                       // sluggish (user: "incredibly slow to turn"); the

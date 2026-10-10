@@ -3,8 +3,8 @@
 // so every locomotion invariant (ramping, steering, gesture gating) applies.
 // Plan: [{do:'walk',forward,right,speed?}, {do:'turn',deg}, {do:'gesture',name},
 //        {do:'jump'}, {do:'wait',s}] — hand frame: forward = +heading, right = 90° cw.
-// 'turn' pivots in place (sim.pivot) — a separate gait from continuous walk-and-turn,
-// which stays limited by the anatomical finger-yaw cone (turnCycle red-by-choice).
+// 'turn' pivots in place (sim.pivot). Walks never steer through a big turn: the sim
+// stops, pivots and goes for any command more than TURN_PIVOT off the heading.
 import * as C from './tuning.js';
 import * as M from './math.js';
 import { GESTURES } from './gestures.js';
@@ -71,21 +71,16 @@ export function makeBrain(sim, rig, camera) {
       }
       const dx = a.target.x - body.position.x, dz = a.target.z - body.position.z;
       const d = Math.hypot(dx, dz);
-      if (d < 0.15) { sim.autoWalk(0, 0); return DONE; }
-      // face big course changes with a pivot first — steering while walking turns
-      // via a slow wide arc (the "turn around and walk back" long-way-around bug);
-      // pivoting is what makes reversals read nimble. One pivot max per action.
-      const bearingErr = M.wrapAngle(Math.atan2(-dz, dx) - sim.s.heading);
-      if (!a.pivoted && Math.abs(bearingErr) > 1.0 && d > 0.5) {
-        if (sim.s.pivotTarget != null) return RUNNING;   // pivot in progress
+      // arrive at speed and stop hard: the sim brakes at STOP_DECEL, so command zero
+      // one stopping distance out. No slow creep onto the target. Big course changes
+      // are the sim's job too (stop, pivot, go — TURN_PIVOT), for every input path.
+      const v = a.speed ?? C.SPEED.strut;
+      const stopD = v * (v / (2 * C.STOP_DECEL) + C.ACCEL_TAU);
+      if (a.stopping || d <= stopD + 0.02) {
+        a.stopping = true;
         sim.autoWalk(0, 0);
-        if (sim.s.speed > C.V_MOVE) return RUNNING;      // brake to stance first
-        if (sim.pivot(bearingErr * 180 / Math.PI)) return RUNNING;
-        a.pivoted = true;                                // refused (busy) — walk the arc
+        return sim.s.speed < 0.03 && sim.s.planted === 5 ? DONE : RUNNING;   // halted and stepped home
       }
-      if (sim.s.pivotTarget != null) return RUNNING;
-      a.pivoted = true;
-      const v = Math.min(a.speed ?? 0.8, Math.max(0.4, 2 * d));  // arrival damping
       sim.autoWalk(dx / d * v, dz / d * v);
       return RUNNING;
     },
@@ -95,7 +90,7 @@ export function makeBrain(sim, rig, camera) {
         // timeout from INITIAL distance, frozen — recomputing per-tick shrinks it
         // toward the floor as the hand approaches while elapsed keeps growing,
         // spuriously killing long slow walks (bit the napping behavior at 9s)
-        a.tmo = 6 + 3 * Math.hypot(a.target.x - body.position.x, a.target.z - body.position.z);
+        a.tmo = 8 + 3 * Math.hypot(a.target.x - body.position.x, a.target.z - body.position.z);
       }
       return ACTIONS.walk(a, dt);                        // reuses walk wholesale
     },
@@ -112,7 +107,7 @@ export function makeBrain(sim, rig, camera) {
     wait: (a) => (a.s ?? 1) + 1,
     jump: () => 5,
     gesture: (a) => (GESTURES[a.name]?.dur ?? 4) + 4,      // sleep is 16s — dur-aware
-    walk: (a) => 6 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // +2s: possible lead-in pivot
+    walk: (a) => 8 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // includes a lead-in pivot
     walkTo: (a) => a.tmo ?? 30,
     turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
   };
