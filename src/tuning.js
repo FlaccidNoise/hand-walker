@@ -6,6 +6,7 @@ export const TIME_SCALE = 0.75;        // slow the clock; hand-sized creature un
 export const SIM_DT = 0.00625;         // s sim — fixed step; the rate every band, gain and gate was measured at
 export const SIM_MAX_SUBSTEPS = 8;     // per frame; past this the sim runs slow instead of unstable
 export const SWING_MIN = 0.11;        // s — the cadence law, startSwing and QA all share it (anatomy, §5)
+export const SWING_MAX = 0.6;         // s — sanity ceiling. A short-band digit swings for most of a slow cycle
 
 // --- SI body / physics ---
 export const MASS = 0.45;             // kg — a real severed adult hand (anatomy, §5)
@@ -51,6 +52,7 @@ export const SEP_AUTH_SWING = 0.30;
 
 // --- Phase gait (§4.5) ---
 export const PHASE_SEP = 0.25;         // min phase gap between spatially adjacent digits
+export const F_MIN = 0.9;              // Hz — cadence floor while moving
 export const BAND_UTIL = 0.8;          // cadence law targets this fraction of the pacer band —
                                        // 0.9/1.0 raise edge drift more than fewer steps save
 
@@ -71,21 +73,34 @@ export const V_MOVE = 0.15;
 // ALOFT in trot/run — its band can't service them. Phase offsets keep spatially
 // adjacent digits ≥PHASE_SEP apart (walk ripple: every neighbour pair 0.4 apart). ---
 export const GAITS = {
-  // thumb WALKS (the solver polish widened its band 0.05 → 0.68; the old benching
-  // rationale is gone) and is carried aloft only in trot/run per §4.7. Walk ripple
-  // keeps every neighbour pair ≥0.4 apart in phase.
-  walk: { duty: 0.78, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: [],
-          offsets: { index: 0.0, ring: 0.2, thumb: 0.4, middle: 0.6, pinky: 0.8 } },
-  trot: { duty: 0.62, fMax: 5.5, arcH: 0.22, vCap: 2.1, aloft: ['thumb'],
-          offsets: { index: 0.0, ring: 0.0, middle: 0.5, pinky: 0.5, thumb: 0.25 } },
-  run:  { duty: 0.50, fMax: 7.0, arcH: 0.24, vCap: Infinity, aloft: ['thumb'],
-          offsets: { index: 0.0, ring: 0.0, middle: 0.5, pinky: 0.5, thumb: 0.25 } },
+  // ratioMin: a short digit keeps at least this share of the longest digit's duty (1 =
+  // one shared stride). Run stays at 1: its pairs already hand off with nothing to spare.
+  //
+  // walk = the strut: a roll across the hand. Touchdowns run index → middle+thumb →
+  // ring → pinky. Ring and pinky lift together (they are coupled in a real hand) and
+  // the pinky lands just after the ring, so the two never close on each other.
+  // Chosen by simulating all 354 patterns on a 0.1 grid that keep 3 digits down: this
+  // one has the widest finger-shaft clearance (1.26 radii, never touching — the old
+  // ripple closed to 0.31 under per-digit duty), 3 planted at all times, slide 0.05 per u.
+  walk: { duty: 0.78, ratioMin: 0.7, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: [],
+          offsets: { index: 0.0, middle: 0.6, thumb: 0.6, ring: 0.3, pinky: 0.1 } },
+  // trot: index+pinky land together (opposite corners), then the middle, then the ring.
+  // Same simulated search over 1000 patterns: shaft clearance 1.21 radii (the old
+  // index+ring / middle+pinky pairs closed to 0.02 once strides grew), slide 0.28 vs 0.39.
+  trot: { duty: 0.62, ratioMin: 0.7, fMax: 5.5, arcH: 0.22, vCap: 2.1, aloft: ['thumb'],
+          offsets: { index: 0.0, pinky: 0.0, middle: 0.6, ring: 0.2, thumb: 0.25 } },
+  // run: index → middle → ring+pinky together. Searched the same way: clearance 1.19
+  // radii against 0.68 for the old pairs, same slide. One digit down at the hand-offs.
+  run:  { duty: 0.50, ratioMin: 1, fMax: 7.0, arcH: 0.24, vCap: Infinity, aloft: ['thumb'],
+          offsets: { index: 0.0, middle: 0.8, ring: 0.4, pinky: 0.4, thumb: 0.25 } },
 };
 export const GAIT_ORDER = ['walk', 'trot', 'run'];
+export const GAIT_SETTLE = 0.35;      // s after a gait change during which two digits must stay down
 export const GAIT_DWELL = 0.25;       // s — no second gait change inside this (each change re-deals swing windows)
-export const MIN_PLANTED = { walk: 2, trot: 1, run: 0 };   // a swing may not start if it would leave fewer
-                                      // planted. Trot/run pairs hand off at the limit: holding 2 there delays
-                                      // lifts and costs grip (A/B: trot slide 0.39→0.63, run 0.39→1.12)
+export const MIN_PLANTED = { walk: 2, trot: 1, run: 1 };   // a swing may not start if it would leave fewer
+                                      // planted. These are each pattern's own minimum, so the guard only acts
+                                      // in transients. Holding 2 in trot/run delays lifts and costs grip
+                                      // (A/B: trot slide 0.39→0.63, run 0.39→1.12)
 export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lower gait's vTop exactly (§4.7)
 
 // --- Steering / cadence ---
@@ -152,6 +167,7 @@ export const POSTURE_PITCH = -0.6;
 // --- TUNE flags (the only thing you should touch when tuning) ---
 export const TUNE = {
   liveBands: 1,      // 1 = per-height band table (default), 0 = A/B control
+  digitDuty: 1,      // 1 = per-digit duty, long fingers set the stride (default), 0 = shortest band paces all
   dMinK: 1.1,        // fold annulus multiplier (anatomy, §5)
   arcClear: ARC_CLEAR,
   // walk-pitch / stance posture baked into the calib scan pose:

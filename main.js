@@ -9,6 +9,7 @@ import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
 import { makeBrain } from './src/brain.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
+import { digitRatio, strideBudget, digitDuty } from './src/gait.js';
 import * as C from './src/tuning.js';
 
 const hud = document.getElementById('hud');
@@ -155,29 +156,30 @@ function makeSim(rig, calib) {
   const s = {
     v: new THREE.Vector3(), cmd: new THREE.Vector3(), cmdT: new THREE.Vector3(),
     vy: 0, heading: 0, yawRate: 0,
-    gait: 'walk', gaitT: 0, phase: 0, f: 0, speed: 0, planted: 0,
+    gait: 'walk', gaitT: 0, phase: 0, f: 0, vEff: 0, speed: 0, planted: 0,
     airborne: false, replant: false, time: 0,
     gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, rng: 1,
   };
   // seeded LCG: the sim core replays exactly (Math.random broke that after 8 s idle)
   const rand = () => (s.rng = (s.rng * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 
-  // --- per-gait derived params (§4.5/§4.7): pacer band, patter multipliers, top speed ---
+  // --- per-gait derived params (§4.5/§4.7): stride budget, per-digit duty ratio, top speed ---
   for (const g of C.GAIT_ORDER) {
     const gd = C.GAITS[g];
     const used = FINGERS.filter(f => !gd.aloft.includes(f));
     const len = {};                                          // usable band: margins eat the edges
     used.forEach(f => len[f] = calib.bands[f]
       ? Math.max(calib.bands[f].hi - calib.bands[f].lo - 2 * C.BAND_MARGIN, 0.05) : 0.05);
-    const maxLen = Math.max(...used.map(f => len[f]));
-    const mult = {};                                         // short-band legs patter at 2× (§4.4)
-    used.forEach(f => mult[f] = len[f] < 0.5 * maxLen ? 2 : 1);
-    const S = C.BAND_UTIL * Math.min(...used.map(f => len[f] * mult[f]));
+    // per-digit duty (src/gait.js): the longest band sets the stride, shorter digits
+    // lift earlier. TUNE.digitDuty 0 = one shared stride paced by the shortest band (A/B)
+    const ratio = C.TUNE.digitDuty ? digitRatio(len, gd.ratioMin)
+      : Object.fromEntries(used.map(f => [f, 1]));
+    const S = strideBudget(len, ratio, C.BAND_UTIL);
     const crossF = (1 - gd.duty) / C.SWING_MIN;
     const vTop = Math.min(gd.vCap, gd.fMax <= crossF
       ? gd.fMax * S / gd.duty
       : gd.fMax * S / (1 - C.SWING_MIN * gd.fMax));
-    s.gaitP[g] = { S, mult, vTop };
+    s.gaitP[g] = { S, len, vTop };
   }
 
   const handToWorld = (p, out) => out.copy(p).applyAxisAngle(UP, s.heading)
@@ -232,6 +234,9 @@ function makeSim(rig, calib) {
   };
   const dutyEff = () => 1 - Math.min(0.9,
     Math.max(1 - C.GAITS[s.gait].duty, C.SWING_MIN * s.f)); // 0.11 s swing floor (§4.5)
+  // this digit's share of the cycle on the ground at the current speed and cadence
+  const dutyOf = (f) => C.TUNE.digitDuty && s.gaitP[s.gait].len[f] != null
+    ? digitDuty(dutyEff(), s.gaitP[s.gait].len[f], C.BAND_UTIL, s.f, s.vEff) : dutyEff();
 
   // band at the height the foot will actually land at (§4.4, TUNE.liveBands)
   function bandAt(f, h) {
@@ -282,14 +287,14 @@ function makeSim(rig, calib) {
   // --- swing planning (§4.6): hand frame, live MCP, band at live height ---
   function startSwing(f) {
     const d = rig.digits[f], leg = legs[f], gp = s.gaitP[s.gait];
-    const mult = gp.mult[f] ?? 1;
+    const duty = dutyOf(f);
     const mcpW = d.mcp.getWorldPosition(_a);
     const mcpHX = worldToHand(mcpW, _b).x;
     const band = bandAt(f, body.position.y) ?? { lo: calib.workC[f] - 0.1, hi: calib.workC[f] + 0.1 };
     const sFrom = worldToHand(leg.foot, _b).x - mcpHX;
     const rescue = sFrom < band.lo - 0.05;                   // started deep behind the band
-    const dur = M.clamp(Math.max((1 - dutyEff()) / Math.max(s.f, 1e-3),
-      C.SWING_MIN, rescue ? C.RESCUE_DUR : 0), C.SWING_MIN, 0.2);
+    const dur = M.clamp(Math.max((1 - duty) / Math.max(s.f, 1e-3),
+      C.SWING_MIN, rescue ? C.RESCUE_DUR : 0), C.SWING_MIN, C.SWING_MAX);
     if (s.pivotTarget != null) {                             // pivot: rest foot rotated to the
       const predHeading = s.heading + s.yawRate * dur;       // PREDICTED touchdown heading —
       const landW = new THREE.Vector3().copy(calib.feet[f])  // same predictive idea as the
@@ -307,7 +312,7 @@ function makeSim(rig, calib) {
       leg.mode = 'swing';
       return;
     }
-    const T = dutyEff() / Math.max(s.f, 1e-3) / mult;        // this leg's stance time
+    const T = duty / Math.max(s.f, 1e-3);                    // this leg's stance time
     const vLoc = _b.copy(s.v).applyAxisAngle(UP, -s.heading);
     // plan in the PREDICTED hand frame at landing time — the body translates v·dur and
     // rotates yawRate·dur during the swing; planning in the current frame lands feet
@@ -563,7 +568,10 @@ function makeSim(rig, calib) {
       const S = s.pivotTarget != null ? pivS : gp.S;
       let f = v * gd.duty / S;
       if (f > crossF) f = v / (S + C.SWING_MIN * v);
-      s.f = Math.min(f, gd.fMax);
+      // cadence floor: a slow walk takes shorter steps at a natural beat instead of
+      // holding a swing in the air for seconds (and a start steps at once)
+      s.f = Math.min(Math.max(f, C.F_MIN), gd.fMax);
+      s.vEff = v;
       s.phase += s.f * dt;                                   // UNWRAPPED: floor() is the cycle id
     } else s.f = 0;
 
@@ -587,7 +595,9 @@ function makeSim(rig, calib) {
     // fewer than MIN_PLANTED digits down — gait changes and pivot starts re-deal the
     // swing windows and used to lift all five at once (body dropped 0.3u and bounced)
     let down = FINGERS.filter(f => legs[f].mode === 'stance').length;
-    const minDown = s.pivotTarget != null ? 2 : C.MIN_PLANTED[s.gait];   // a pivot borrows run cadence, not its aerial phase
+    // a pivot borrows run cadence, not its aerial phase; and a gait change re-deals
+    // the swing windows (trot→run lifted all four at once and dropped the wrist 0.6 u)
+    const minDown = s.pivotTarget != null || s.gaitT < C.GAIT_SETTLE ? 2 : C.MIN_PLANTED[s.gait];
     const mayLift = () => down - 1 >= minDown;
     for (const f of FINGERS) {
       const leg = legs[f];
@@ -613,9 +623,9 @@ function makeSim(rig, calib) {
         }
         leg.mode = 'swing'; leg.cycleId = -1;
       }
-      const cyc = s.phase * (gp.mult[f] ?? 1) + gd.offsets[f];
+      const cyc = s.phase + gd.offsets[f];
       const p = cyc % 1, id = Math.floor(cyc);
-      if (leg.mode === 'stance' && s.f > 0 && p >= de && leg.cycleId !== id) {
+      if (leg.mode === 'stance' && s.f > 0 && p >= dutyOf(f) && leg.cycleId !== id) {
         if (mayLift()) { leg.cycleId = id; startSwing(f); down--; }
       } else if (leg.mode === 'stance' && s.f > 0 && leg.cycleId !== id) {
         // band-exit rescue (§4.6): a foot dragged past the band bottom, swept out of

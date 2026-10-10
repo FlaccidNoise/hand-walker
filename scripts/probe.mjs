@@ -6,7 +6,7 @@ const expr = process.argv[2] || '({ok:true})';
 const settleMs = +(process.env.SETTLE_MS || 2500);
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({
-  executablePath: chrome, headless: 'new',
+  executablePath: chrome, headless: 'new', protocolTimeout: 900000,
   args: ['--no-first-run', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'],
 });
 try {

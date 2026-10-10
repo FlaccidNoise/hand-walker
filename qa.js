@@ -1,10 +1,12 @@
 // qa.js — dev-only QA harness (§6). STRIPPED from the artifact build. Drives the sim
 // through window.__hand via scripted scenarios on the real rAF loop, recording:
 //   slide     accumulated planted-tip xz drift               <= 0.10 per u walked (< 0.5 u in place)
-//   cross     worst neighbour lane-order margin (hand z)    > -0.05
+//   gap       closest neighbouring finger shafts, in flesh radii  >= 0.45  (rest 1.35; < 1 = pads overlap)
+//   cross     worst neighbour lane-order margin (hand z), reported only: it misreads a
+//             pinky planted behind and outside the ring as a crossing
 //   floor     min contact-joint height above ground (u)     >= -0.01
 //   tipErrP95 95th pct planted solve error (u)              < 0.08
-//   swingDur  observed swing durations (s)                  in [0.11, 0.20]
+//   swingDur  observed swing durations (s)                  in [0.11, 0.60]
 //   towed     any leg dragged planted at err>0.15 for >0.5s none
 //   clear     worst swing peak / carried-digit clearance (u)   >= 0.10
 //   touchdown tip travel in the landing sim step (u)           <= 0.035
@@ -13,7 +15,7 @@
 
 const F = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 const NEIGHBOR_PAIRS = [['thumb', 'index'], ['index', 'middle'], ['middle', 'ring'], ['ring', 'pinky']];
-const CRIT = { slide: 0.5, slidePerU: 0.10, cross: -0.05, floor: -0.01, tipErrP95: 0.08, swingLo: 0.11, swingHi: 0.20,
+const CRIT = { slide: 0.5, slidePerU: 0.10, gap: 0.45, floor: -0.01, tipErrP95: 0.08, swingLo: 0.11, swingHi: 0.60,
   clear: 0.10,     // every swing peak and every carried digit clears the floor by this
   plantedMin: 2, bodyBob: 0.06,     // pivot180 only: support never drops, the wrist does not hop
   tipStep: 0.16, returnErr: 0.02,   // gestures only: no digit snaps, every tip comes back to rest
@@ -28,6 +30,21 @@ const sleep = async (ms) => {
   const hz = window.__vhz || 120, n = Math.round(ms * hz / 1000);
   for (let i = 0; i < n; i++) window.__vframe(1000 / hz);
 };
+
+// closest distance between segments p1-q1 and p2-q2 (Ericson, Real-Time Collision Detection)
+function segDist(p1, q1, p2, q2) {
+  const d1 = q1.clone().sub(p1), d2 = q2.clone().sub(p2), r = p1.clone().sub(p2);
+  const a = d1.dot(d1), e = d2.dot(d2), f = d2.dot(r);
+  let s = 0, t = 0;
+  if (a > 1e-12 && e > 1e-12) {
+    const b = d1.dot(d2), c = d1.dot(r), den = a * e - b * b;
+    s = den > 1e-12 ? Math.min(Math.max((b * f - c * e) / den, 0), 1) : 0;
+    t = (b * s + f) / e;
+    if (t < 0) { t = 0; s = Math.min(Math.max(-c / a, 0), 1); }
+    else if (t > 1) { t = 1; s = Math.min(Math.max((b - c) / a, 0), 1); }
+  }
+  return p1.clone().addScaledVector(d1, s).distanceTo(p2.clone().addScaledVector(d2, t));
+}
 
 function makeRecorder(H) {
   const { sim, rig } = H;
@@ -44,7 +61,7 @@ function makeRecorder(H) {
   const L = {
     yMin: Infinity, yMax: -Infinity, plantedMin: Infinity, dist: 0,
     px: rig.mount.position.x, pz: rig.mount.position.z, cmdOn: false, tStop: null, tMove: null,
-    touchdown: 0, aloftClear: Infinity, t0: sim.s.time, tipStep: 0,
+    touchdown: 0, aloftClear: Infinity, t0: sim.s.time, tipStep: 0, gap: Infinity,
     d: Object.fromEntries(F.map(f => [f, { mode: null, prev: null, from: null, peak: 0, clear: Infinity, steps: 0, len: 0, aloftT: 0 }])),
   };
   const tick = () => {
@@ -125,6 +142,18 @@ function makeRecorder(H) {
       } else q.aloftT = 0;
       q.mode = leg.mode; q.prev = { x: tip.x, y: tip.y, z: tip.z };
     }
+    // gap: neighbouring finger SHAFTS (3 segments each), as a multiple of their flesh
+    // radii. Below ~1 the capsules interpenetrate. Unlike `cross` (hand-z order) this
+    // is not fooled by a pinky planted behind and outside the ring.
+    for (const [a, b] of NEIGHBOR_PAIRS) {
+      const da = rig.digits[a], db = rig.digits[b];
+      const A = [da.mcp, da.pip, da.dip, da.tip].map(j => j.getWorldPosition(new V()));
+      const B = [db.mcp, db.pip, db.dip, db.tip].map(j => j.getWorldPosition(new V()));
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+        const g = segDist(A[i], A[i + 1], B[j], B[j + 1]) / (da.flesh + db.flesh);
+        if (g < L.gap) { L.gap = g; L.gapWho = `${a}/${b} t=${(sim.s.time - L.t0).toFixed(2)}`; }
+      }
+    }
     for (const [a, b] of NEIGHBOR_PAIRS) {
       // carried legs (aloft/tuck) aren't stepping feet — lane order applies to
       // planted and swinging legs only (§4.6/§4.7)
@@ -132,7 +161,7 @@ function makeRecorder(H) {
       if (!stepping(sim.legs[a].mode) || !stepping(sim.legs[b].mode)) continue;
       const sign = Math.sign(restZ[b] - restZ[a]);
       const margin = (sim.legs[b]._zHand - sim.legs[a]._zHand) * sign;
-      if (margin < r.cross) r.cross = margin;
+      if (margin < r.cross) { r.cross = margin; L.crossWho = `${a}(${sim.legs[a].mode})/${b}(${sim.legs[b].mode}) t=${(sim.s.time - L.t0).toFixed(2)}`; }
     }
   };
   tick();
@@ -160,6 +189,7 @@ function makeRecorder(H) {
         stepLen: Object.fromEntries(F.map(f => [f, L.d[f].steps ? +(L.d[f].len / L.d[f].steps).toFixed(3) : null])),
         footfallsPerU: L.dist > 0.5 ? +(r.steps / L.dist).toFixed(2) : null,
         slidePerU: L.dist > 0.5 ? +(r.slide / L.dist).toFixed(3) : null,
+        gap: +L.gap.toFixed(3), gapWho: L.gapWho,
         touchdown: +L.touchdown.toFixed(4),
         tipStep: +L.tipStep.toFixed(3),                     // largest 3D tip move in one sim step
         bodyBob: +(L.yMax - L.yMin).toFixed(3),
@@ -180,7 +210,7 @@ function makeRecorder(H) {
         if (m.plantedMin < CRIT.plantedMin) fails.push(`planted ${m.plantedMin}`);
         if (m.bodyBob > CRIT.bodyBob) fails.push(`bob ${m.bodyBob}`);
       }
-      if (!G && m.cross <= CRIT.cross) fails.push(`cross ${m.cross}`);
+      if (!G && m.gap < CRIT.gap) fails.push(`finger gap ${m.gap} (${L.gapWho})`);
       if (m.floor < CRIT.floor) fails.push(`floor ${m.floor}`);
       if (m.tipErrP95 >= CRIT.tipErrP95) fails.push(`tipErrP95 ${m.tipErrP95}`);
       if (!G && m.swingMin != null && (m.swingMin < CRIT.swingLo - 0.01 || m.swingMax > CRIT.swingHi + 0.01))
