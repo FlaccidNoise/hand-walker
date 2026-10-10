@@ -108,13 +108,21 @@ async function init() {
   // camera is the fixed diorama view set in buildScene — nothing to do here
 
   const clock = new THREE.Clock();
-  let frames = 0, fpsT = 0;
+  let frames = 0, fpsT = 0, acc = 0;
   function loop() {
     requestAnimationFrame(loop);
     const dt = Math.min(clock.getDelta(), 1 / 30);
     if (!state.paused) {
-      sim.step(dt * C.TIME_SCALE);                           // TIME_SCALE slows the clock (§4.8)
-      brain.tick(dt * C.TIME_SCALE);
+      // fixed step: the support spring's explicit damping diverges past ~7.9 ms, so a
+      // 60 Hz frame (12.5 ms sim) fed straight in launches the standing hand
+      acc += dt * C.TIME_SCALE;                              // TIME_SCALE slows the clock (§4.8)
+      let n = 0;
+      while (acc >= C.SIM_DT && n++ < C.SIM_MAX_SUBSTEPS) {
+        sim.step(C.SIM_DT);
+        brain.tick(C.SIM_DT);
+        acc -= C.SIM_DT;
+      }
+      if (acc >= C.SIM_DT) acc = 0;                          // overloaded: drop time, never feed a long step
     }
     if (controls.enabled) controls.update();                 // fixed diorama camera; orbit is debug-only
     renderer.render(scene, camera);

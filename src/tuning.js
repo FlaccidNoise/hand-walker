@@ -3,6 +3,8 @@
 
 // --- Time ---
 export const TIME_SCALE = 0.75;        // slow the clock; hand-sized creature under real gravity moves violently fast
+export const SIM_DT = 0.00625;         // s sim — fixed step; the rate every band, gain and gate was measured at
+export const SIM_MAX_SUBSTEPS = 8;     // per frame; past this the sim runs slow instead of unstable
 export const SWING_MIN = 0.11;        // s — the cadence law, startSwing and QA all share it (anatomy, §5)
 
 // --- SI body / physics ---
