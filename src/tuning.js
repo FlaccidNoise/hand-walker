@@ -82,16 +82,16 @@ export const GAITS = {
   // Chosen by simulating all 354 patterns on a 0.1 grid that keep 3 digits down: this
   // one has the widest finger-shaft clearance (1.26 radii, never touching — the old
   // ripple closed to 0.31 under per-digit duty), 3 planted at all times, slide 0.05 per u.
-  walk: { duty: 0.78, ratioMin: 0.7, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: [],
+  walk: { duty: 0.78, ratioMin: 0.7, enter: 0.2, fMax: 3.0, arcH: 0.18, vCap: 1.3, aloft: [],
           offsets: { index: 0.0, middle: 0.6, thumb: 0.6, ring: 0.3, pinky: 0.1 } },
   // trot: index+pinky land together (opposite corners), then the middle, then the ring.
   // Same simulated search over 1000 patterns: shaft clearance 1.21 radii (the old
   // index+ring / middle+pinky pairs closed to 0.02 once strides grew), slide 0.28 vs 0.39.
-  trot: { duty: 0.62, ratioMin: 0.7, fMax: 5.5, arcH: 0.22, vCap: 2.1, aloft: ['thumb'],
+  trot: { duty: 0.62, ratioMin: 0.7, enter: 0.8, fMax: 5.5, arcH: 0.22, vCap: 2.1, aloft: ['thumb'],
           offsets: { index: 0.0, pinky: 0.0, middle: 0.6, ring: 0.2, thumb: 0.25 } },
   // run: index → middle → ring+pinky together. Searched the same way: clearance 1.19
   // radii against 0.68 for the old pairs, same slide. One digit down at the hand-offs.
-  run:  { duty: 0.50, ratioMin: 1, fMax: 7.0, arcH: 0.24, vCap: Infinity, aloft: ['thumb'],
+  run:  { duty: 0.50, ratioMin: 1, enter: 0.3, fMax: 7.0, arcH: 0.24, vCap: Infinity, aloft: ['thumb'],
           offsets: { index: 0.0, middle: 0.8, ring: 0.4, pinky: 0.4, thumb: 0.25 } },
 };
 export const GAIT_ORDER = ['walk', 'trot', 'run'];
@@ -113,6 +113,10 @@ export const ACCEL_TAU = 0.12;        // s — velocity-command response time (f
 export const CMD_ACCEL = 3.2;         // u/s² — commanded-speed ramp; friction allows ~124 u/s²
                                       // (0→run in 20ms) which strands every planted foot a full
                                       // reach behind. Volition: accelerate at what legs service.
+export const STOP_DECEL = 10;          // u/s² — commanded-speed ramp when slowing (see step())
+export const STOP_GRIP = 30;           // 1/s — velocity decay below V_MOVE once the command is zero
+export const SETTLE_TOL = 0.08;       // u — at rest, a planted foot further than this from its rest steps home
+export const SETTLE_DUR = 0.16;       // s — a settle step
 export const RIDE_TAU = 0.3;          // s — ride-height easing; an instant crouch↔stand step
                                       // through the support spring reads as a POP at every stop
 

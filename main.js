@@ -232,6 +232,13 @@ function makeSim(rig, calib) {
     body.rotation.set(C.TUNE.walkRoll + g.roll, s.heading + g.heading, C.TUNE.walkPitch + g.pitch);
     rig.root.updateMatrixWorld(true);
   };
+  // how far a planted foot sits from its rest spot under the body (ground plane)
+  const offRest = (f) => {
+    handToWorld(_b.copy(calib.feet[f]), _a);
+    return Math.hypot(legs[f].foot.x - _a.x, legs[f].foot.z - _a.z);
+  };
+  // jump the (unwrapped, monotonic) phase forward to fraction `want` of a cycle
+  const enterPhase = (want) => { s.phase = Math.floor(s.phase) + want + (s.phase % 1 > want ? 1 : 0); };
   const dutyEff = () => 1 - Math.min(0.9,
     Math.max(1 - C.GAITS[s.gait].duty, C.SWING_MIN * s.f)); // 0.11 s swing floor (§4.5)
   // this digit's share of the cycle on the ground at the current speed and cadence
@@ -284,6 +291,17 @@ function makeSim(rig, calib) {
   const solveStance = (f, dt = 0) =>
     solveLegWorld(f, legs[f].foot, dt ? C.RATE_PLANTED : 0, dt, 0, legs[f].branch ?? null);
 
+  // a digit's rest spot under the pose the body will have when it has stopped (the
+  // body still travels v·(|v|/2·STOP_DECEL + ACCEL_TAU) once the command is zero)
+  function restLanding(f) {
+    const sp = Math.hypot(s.v.x, s.v.z);
+    const k = s.cmdT.x === 0 && s.cmdT.z === 0 ? sp / (2 * C.STOP_DECEL) + C.ACCEL_TAU : 0;
+    const landW = new THREE.Vector3().copy(calib.feet[f]).applyAxisAngle(UP, s.heading)
+      .add(_c.set(body.position.x + s.v.x * k, 0, body.position.z + s.v.z * k));
+    landW.y = groundY(landW.x, landW.z) + padHeight(rig.digits[f]);
+    return landW;
+  }
+
   // --- swing planning (§4.6): hand frame, live MCP, band at live height ---
   function startSwing(f) {
     const d = rig.digits[f], leg = legs[f], gp = s.gaitP[s.gait];
@@ -305,10 +323,11 @@ function makeSim(rig, calib) {
       leg.mode = 'swing';
       return;
     }
-    if (s.f === 0) {                                         // idle settle: go to the
-      const landW = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // VALIDATED rest
-      landW.y = groundY(landW.x, landW.z) + padHeight(d);
-      leg.swing = { from: leg.foot.clone(), to: landW, t: 0, dur, rescue: false };
+    // stopping or stopped: every swing lands on its REST spot, at the pose the body
+    // will have once it halts — so the hand finishes in its stance, not mid-stride
+    if (s.f === 0 || (s.cmdT.x === 0 && s.cmdT.z === 0)) {
+      leg.swing = { from: leg.foot.clone(), to: restLanding(f), t: 0,
+        dur: s.f === 0 ? C.SETTLE_DUR : dur, rescue: false };
       leg.mode = 'swing';
       return;
     }
@@ -444,7 +463,10 @@ function makeSim(rig, calib) {
     s.time += dt;
     // ramp the command toward its target at CMD_ACCEL — see tuning.js
     const dcx = s.cmdT.x - s.cmd.x, dcz = s.cmdT.z - s.cmd.z;
-    const dcl = Math.hypot(dcx, dcz), dcMax = C.CMD_ACCEL * dt;
+    // slowing is not leg-limited the way speeding up is (no foot is stranded behind a
+    // body that stops), so a stop ramps at STOP_DECEL: hard stops, staccato
+    const braking = Math.hypot(s.cmdT.x, s.cmdT.z) < Math.hypot(s.cmd.x, s.cmd.z);
+    const dcl = Math.hypot(dcx, dcz), dcMax = (braking ? C.STOP_DECEL : C.CMD_ACCEL) * dt;
     if (dcl > dcMax) { s.cmd.x += dcx / dcl * dcMax; s.cmd.z += dcz / dcl * dcMax; }
     else { s.cmd.x = s.cmdT.x; s.cmd.z = s.cmdT.z; }
     const cmdSpeed = Math.hypot(s.cmd.x, s.cmd.z);
@@ -479,8 +501,10 @@ function makeSim(rig, calib) {
     const gi = C.GAIT_ORDER.indexOf(s.gait);
     s.gaitT += dt;
     if (s.gaitT > C.GAIT_DWELL) {
-      if (gi < 2 && gaitDemand > s.gaitP[s.gait].vTop + C.GAIT_HYST) { s.gait = C.GAIT_ORDER[gi + 1]; s.gaitT = 0; }
-      else if (gi > 0 && gaitDemand < s.gaitP[C.GAIT_ORDER[gi - 1]].vTop) { s.gait = C.GAIT_ORDER[gi - 1]; s.gaitT = 0; }
+      const g0 = s.gait;
+      if (gi < 2 && gaitDemand > s.gaitP[s.gait].vTop + C.GAIT_HYST) s.gait = C.GAIT_ORDER[gi + 1];
+      else if (gi > 0 && gaitDemand < s.gaitP[C.GAIT_ORDER[gi - 1]].vTop) s.gait = C.GAIT_ORDER[gi - 1];
+      if (s.gait !== g0) { s.gaitT = 0; if (s.f > 0 && s.pivotTarget == null) enterPhase(C.GAITS[s.gait].enter); }
     }
 
     // --- SI physics (§4.8) ---
@@ -528,6 +552,8 @@ function makeSim(rig, calib) {
       const aLen = Math.hypot(ax, az);
       const k = aLen > aCap ? aCap / aLen : 1;               // tract clamp
       s.v.x += ax * k * dt; s.v.z += az * k * dt;
+      // the last creep of a stop is planted fingers gripping: kill it, do not coast it out
+      if (cmdSpeed === 0 && s.speed < C.V_MOVE) { const g = Math.exp(-C.STOP_GRIP * dt); s.v.x *= g; s.v.z *= g; }
     }
     body.position.x += s.v.x * dt;
     body.position.z += s.v.z * dt;
@@ -570,8 +596,13 @@ function makeSim(rig, calib) {
       if (f > crossF) f = v / (S + C.SWING_MIN * v);
       // cadence floor: a slow walk takes shorter steps at a natural beat instead of
       // holding a swing in the air for seconds (and a start steps at once)
+      const starting = s.f === 0;
       s.f = Math.min(Math.max(f, C.F_MIN), gd.fMax);
       s.vEff = v;
+      // decisive, repeatable start: enter the cycle at the gait's own entry phase, so
+      // the first step begins at once (it waited up to a cycle: 0.24 s of nothing) and
+      // the start-up footfalls are the ones the pattern was checked with
+      if (starting && s.pivotTarget == null) enterPhase(gd.enter);   // (entry phases are tuned for travel, not pivots)
       s.phase += s.f * dt;                                   // UNWRAPPED: floor() is the cycle id
     } else s.f = 0;
 
@@ -597,7 +628,8 @@ function makeSim(rig, calib) {
     let down = FINGERS.filter(f => legs[f].mode === 'stance').length;
     // a pivot borrows run cadence, not its aerial phase; and a gait change re-deals
     // the swing windows (trot→run lifted all four at once and dropped the wrist 0.6 u)
-    const minDown = s.pivotTarget != null || s.gaitT < C.GAIT_SETTLE ? 2 : C.MIN_PLANTED[s.gait];
+    const minDown = s.f === 0 ? 3                            // settling at rest: two feet at a time, no more
+      : s.pivotTarget != null || s.gaitT < C.GAIT_SETTLE ? 2 : C.MIN_PLANTED[s.gait];
     const mayLift = () => down - 1 >= minDown;
     for (const f of FINGERS) {
       const leg = legs[f];
@@ -613,10 +645,9 @@ function makeSim(rig, calib) {
         leg.mode = 'aloft'; poseLeg(f, calib.aloft[f], C.RATE_CARRY, dt); continue;
       }
       if (leg.mode === 'aloft' || leg.mode === 'tuck' || leg.mode === 'gesture') { // re-plant via a REAL swing —
-        const to = handToWorld(_b.copy(calib.feet[f]), new THREE.Vector3()); // teleporting
-        to.y = groundY(to.x, to.z) + padHeight(rig.digits[f]); // the foot dragged the tip
+        // teleporting the foot dragged the tip across at the rate cap (jank)
         leg.swing = { from: rig.digits[f].tip.getWorldPosition(new THREE.Vector3()),
-          to, t: 0, dur: C.REPLANT_DUR, rescue: false, replant: true };   // across at the rate cap (jank)
+          to: restLanding(f), t: 0, dur: C.REPLANT_DUR, rescue: false, replant: true };
         if (hovering()) {                                     // digits' window closed mid-hover: gear down
           leg.swing.a0 = { ...leg.angles };
           leg.swing.dur = C.HOVER_UNFURL * s.gesture.dur;
@@ -643,8 +674,9 @@ function makeSim(rig, calib) {
           || leg.err > 4 * C.BAND_TIP_ERR) {
           if (mayLift()) { leg.cycleId = id; startSwing(f); down--; }
         }
-      } else if (leg.mode === 'stance' && s.f === 0 && leg.err > 2 * C.BAND_TIP_ERR && mayLift()) {
-        startSwing(f); down--;                               // settle a stretched leg at rest
+      } else if (leg.mode === 'stance' && s.f === 0 && mayLift()
+          && (leg.err > 2 * C.BAND_TIP_ERR || offRest(f) > C.SETTLE_TOL)) {
+        startSwing(f); down--;                               // settle: step a stray foot home
       }
       if (leg.mode === 'swing') advanceSwing(f, dt);
       else solveStance(f, dt);

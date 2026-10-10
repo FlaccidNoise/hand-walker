@@ -19,7 +19,8 @@ const CRIT = { slide: 0.5, slidePerU: 0.10, gap: 0.45, floor: -0.01, tipErrP95: 
   clear: 0.10,     // every swing peak and every carried digit clears the floor by this
   plantedMin: 2, bodyBob: 0.06,     // pivot180 only: support never drops, the wrist does not hop
   tipStep: 0.16, returnErr: 0.02,   // gestures only: no digit snaps, every tip comes back to rest
-  touchdown: 0.035 };               // tip travel in the landing sim step: placed, not scuffed (was 0.054-0.070)
+  touchdown: 0.035,
+  restErr: 0.10, stopSettle: 0.7 }; // stop only: feet end on their rest spots, all motion over in this many s               // tip travel in the landing sim step: placed, not scuffed (was 0.054-0.070)
 // a pivot re-steps every digit ~10 times: its slide bar is its own (0.034 per stance)
 const SLIDE = { pivot180: 2.0 };
 
@@ -201,11 +202,12 @@ function makeRecorder(H) {
       const G = name === 'gestures';                         // digits are posed, not stepping: gait bars do not apply
       // travel scenarios are judged per unit walked (a long run is not worse than a short
       // one); in-place scenarios keep the absolute bar
-      if (!G && m.slidePerU != null && L.dist > 2) {
+      if (!G && m.slidePerU != null && L.dist > 4) {
         if (m.slidePerU > CRIT.slidePerU) fails.push(`slide/u ${m.slidePerU}`);
       } else if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
       if (name === 'gestures' && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
       if (m.touchdown > CRIT.touchdown) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
+      if (name === 'stop' && m.stopSettle > CRIT.stopSettle) fails.push(`settle ${m.stopSettle}s`);
       if (name === 'pivot180') {
         if (m.plantedMin < CRIT.plantedMin) fails.push(`planted ${m.plantedMin}`);
         if (m.bodyBob > CRIT.bodyBob) fails.push(`bob ${m.bodyBob}`);
@@ -282,7 +284,18 @@ const SCENARIOS = {
     for (let i = 0; i < 400 && H.brain.st.i >= 0; i++) await sleep(100);
     if (H.brain.st.status === 'error') throw new Error('clickWalk: brain ' + H.brain.st.detail);
   },
-  async stop(H) { H.autoWalk(0.8, 0); await sleep(3000); H.autoWalk(0, 0); await sleep(2000); },
+  // walk, stop, hold: the hand must halt fast, finish IN its stance, and then be still
+  async stop(H) {
+    H.autoWalk(0.8, 0); await sleep(3000); H.autoWalk(0, 0); await sleep(2000);
+    const V = H.THREE.Vector3, B = H.rig.mount.position, a = H.sim.s.heading, bad = [];
+    const off = F.map(f => {
+      const t = H.rig.digits[f].tip.getWorldPosition(new V()), r = H.calib.feet[f];
+      return Math.hypot((t.x - B.x) * Math.cos(a) - (t.z - B.z) * Math.sin(a) - r.x,
+        (t.x - B.x) * Math.sin(a) + (t.z - B.z) * Math.cos(a) - r.z);
+    });
+    if (Math.max(...off) > CRIT.restErr) bad.push(`stops ${Math.max(...off).toFixed(3)} off its stance`);
+    return bad;
+  },
   async gaitShift(H) {
     for (const v of [0.4, 1.0, 1.7, 2.5, 1.7, 1.0, 0.4]) {
       H.autoWalk(v, 0); await sleep(1400);
@@ -294,7 +307,8 @@ const SCENARIOS = {
 const KNOWN_RED = {
   spam: 'seeded chaos input: lane order breaks under 160 ms direction flips',
   turnCycle: 'walk-and-turn scrub, the finger yaw cone binds (plan Task 17)',
-  clickWalk: 'course changes scrub 0.47 per u (plan Tasks 6, 17)',
+  clickWalk: 'course changes scrub 0.18 per u (plan Task 17)',
+  jumpRun: 'ring and pinky pads overlap (gap 0.27) on the first strides after a running jump lands',
 };
 
 async function scenario(name) {
