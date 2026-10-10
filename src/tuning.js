@@ -82,6 +82,10 @@ export const GAITS = {
           offsets: { index: 0.0, ring: 0.0, middle: 0.5, pinky: 0.5, thumb: 0.25 } },
 };
 export const GAIT_ORDER = ['walk', 'trot', 'run'];
+export const GAIT_DWELL = 0.25;       // s — no second gait change inside this (each change re-deals swing windows)
+export const MIN_PLANTED = { walk: 2, trot: 1, run: 0 };   // a swing may not start if it would leave fewer
+                                      // planted. Trot/run pairs hand off at the limit: holding 2 there delays
+                                      // lifts and costs grip (A/B: trot slide 0.39→0.63, run 0.39→1.12)
 export const GAIT_HYST = 0.15;        // upshift at vTop+0.15, downshift at lower gait's vTop exactly (§4.7)
 
 // --- Steering / cadence ---
@@ -176,7 +180,12 @@ export const BEHAVE_SIM_QUIET = 12;   // s sim with NO sim input before behavior
 // lane clamp (LANE_CLAMP) saturates under a fast yaw rate regardless of translation,
 // so reusing it unchanged would throttle a pivot the same way it throttles turnCycle.
 export const PIVOT_GAIN = 6;          // 1/s, proportional heading-error gain
-export const PIVOT_YAW_MAX = 2.2;     // rad/s — scan-verify via probe.mjs, not assumed
+export const PIVOT_YAW_MAX = 1.5;     // rad/s — with PIVOT_SWEEP, scanned on pivot180 (sweep/yaw → slide, s per 180°):
+                                      // .27/2.2 → 3.90, 1.8 s · .20/1.8 → 2.76, 2.1 s · .16/1.5 → 1.75, 2.4 s · .12/1.1 → 0.78, 3.1 s
+export const PIVOT_SWEEP = 0.16;      // rad of hand-frame arc a planted foot may sweep per stance. 0.27 (the
+                                      // translation band) rides the finger-yaw cone: stance errP95 0.094 vs 0.010 here
+export const PIVOT_ACCEL = 9;          // rad/s² — yaw-rate ramp; a one-step jump to 2.2 rad/s upshifted
+                                      // walk→run in two steps and lifted all five digits at once
 export const PIVOT_DONE_EPS = 0.03;   // rad (~1.7°) heading error to call a pivot done
 
 // --- Handedness: this GLB is a LEFT hand (the severed "Thing"). rig.js derives

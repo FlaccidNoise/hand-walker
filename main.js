@@ -154,7 +154,7 @@ function makeSim(rig, calib) {
   const s = {
     v: new THREE.Vector3(), cmd: new THREE.Vector3(), cmdT: new THREE.Vector3(),
     vy: 0, heading: 0, yawRate: 0,
-    gait: 'walk', phase: 0, f: 0, speed: 0, planted: 0,
+    gait: 'walk', gaitT: 0, phase: 0, f: 0, speed: 0, planted: 0,
     airborne: false, time: 0,
     gaitP: {}, gesture: null, lastInput: 0, nextIdleAt: 0, pivotTarget: null, rng: 1,
   };
@@ -420,7 +420,10 @@ function makeSim(rig, calib) {
     if (s.pivotTarget != null) {                              // pivot-in-place: decoupled from
       const err = M.wrapAngle(s.pivotTarget - s.heading);     // the cmdSpeed gate below — turns
       if (Math.abs(err) < C.PIVOT_DONE_EPS) { s.pivotTarget = null; s.yawRate = 0; }
-      else s.yawRate = M.clamp(C.PIVOT_GAIN * err, -C.PIVOT_YAW_MAX, C.PIVOT_YAW_MAX);
+      else {
+        const want = M.clamp(C.PIVOT_GAIN * err, -C.PIVOT_YAW_MAX, C.PIVOT_YAW_MAX);
+        s.yawRate += M.clamp(want - s.yawRate, -C.PIVOT_ACCEL * dt, C.PIVOT_ACCEL * dt);
+      }
     } else if (cmdSpeed > C.V_MOVE && !s.airborne) {
       const hd = Math.atan2(-s.cmd.z, s.cmd.x);
       s.yawRate = M.clamp(C.STEER_GAIN * M.wrapAngle(hd - s.heading), -C.YAW_RATE_MAX, C.YAW_RATE_MAX);
@@ -434,10 +437,17 @@ function makeSim(rig, calib) {
     // while sweep-per-stance keeps growing with yaw rate past that saturation point
     // (measured: yawRate 1.6-2.2 both blow stance err to 0.38-0.57, worse at higher
     // rate, exactly as fMax-saturated sweep = yawRate·(duty/fMax) predicts).
-    const gaitDemand = s.pivotTarget != null ? Math.abs(s.yawRate) * calib.rFoot : cmdSpeed;
+    // a pivot paces on its own stride budget: the arc a planted foot may sweep before
+    // the finger-yaw cone binds (PIVOT_SWEEP·rFoot), not the translation band
+    const pivS = Math.min(s.gaitP[s.gait].S, C.PIVOT_SWEEP * calib.rFoot);
+    const gaitDemand = s.pivotTarget != null
+      ? Math.abs(s.yawRate) * calib.rFoot * s.gaitP[s.gait].S / pivS : cmdSpeed;
     const gi = C.GAIT_ORDER.indexOf(s.gait);
-    if (gi < 2 && gaitDemand > s.gaitP[s.gait].vTop + C.GAIT_HYST) s.gait = C.GAIT_ORDER[gi + 1];
-    else if (gi > 0 && gaitDemand < s.gaitP[C.GAIT_ORDER[gi - 1]].vTop) s.gait = C.GAIT_ORDER[gi - 1];
+    s.gaitT += dt;
+    if (s.gaitT > C.GAIT_DWELL) {
+      if (gi < 2 && gaitDemand > s.gaitP[s.gait].vTop + C.GAIT_HYST) { s.gait = C.GAIT_ORDER[gi + 1]; s.gaitT = 0; }
+      else if (gi > 0 && gaitDemand < s.gaitP[C.GAIT_ORDER[gi - 1]].vTop) { s.gait = C.GAIT_ORDER[gi - 1]; s.gaitT = 0; }
+    }
 
     // --- SI physics (§4.8) ---
     s.speed = Math.hypot(s.v.x, s.v.z);
@@ -522,8 +532,9 @@ function makeSim(rig, calib) {
     if (!s.airborne && (cmdSpeed > C.V_MOVE || s.speed > C.V_MOVE || Math.abs(s.yawRate) > 0.05)) {
       const v = Math.max(s.speed + Math.abs(s.yawRate) * calib.rFoot, C.V_MOVE);
       const crossF = (1 - gd.duty) / C.SWING_MIN;
-      let f = v * gd.duty / gp.S;
-      if (f > crossF) f = v / (gp.S + C.SWING_MIN * v);
+      const S = s.pivotTarget != null ? pivS : gp.S;
+      let f = v * gd.duty / S;
+      if (f > crossF) f = v / (S + C.SWING_MIN * v);
       s.f = Math.min(f, gd.fMax);
       s.phase += s.f * dt;                                   // UNWRAPPED: floor() is the cycle id
     } else s.f = 0;
@@ -544,6 +555,12 @@ function makeSim(rig, calib) {
 
     // --- legs ---
     const de = dutyEff();
+    // support guard: a swing waits (phase slot stays open) while lifting would leave
+    // fewer than MIN_PLANTED digits down — gait changes and pivot starts re-deal the
+    // swing windows and used to lift all five at once (body dropped 0.3u and bounced)
+    let down = FINGERS.filter(f => legs[f].mode === 'stance').length;
+    const minDown = s.pivotTarget != null ? 2 : C.MIN_PLANTED[s.gait];   // a pivot borrows run cadence, not its aerial phase
+    const mayLift = () => down - 1 >= minDown;
     for (const f of FINGERS) {
       const leg = legs[f];
       if (s.airborne) { leg.mode = 'tuck'; tuckLeg(f, dt); continue; }
@@ -567,8 +584,7 @@ function makeSim(rig, calib) {
       const cyc = s.phase * (gp.mult[f] ?? 1) + gd.offsets[f];
       const p = cyc % 1, id = Math.floor(cyc);
       if (leg.mode === 'stance' && s.f > 0 && p >= de && leg.cycleId !== id) {
-        leg.cycleId = id;
-        startSwing(f);
+        if (mayLift()) { leg.cycleId = id; startSwing(f); down--; }
       } else if (leg.mode === 'stance' && s.f > 0 && leg.cycleId !== id) {
         // band-exit rescue (§4.6): a foot dragged past the band bottom, swept out of
         // its lane by rotation, or unreachable can't wait for its phase slot
@@ -583,11 +599,10 @@ function makeSim(rig, calib) {
         if ((band && sFoot < band.lo - 0.02)
           || zOff > 2 * d2.reachW * C.LANE_CLAMP
           || leg.err > 4 * C.BAND_TIP_ERR) {
-          leg.cycleId = id;
-          startSwing(f);
+          if (mayLift()) { leg.cycleId = id; startSwing(f); down--; }
         }
-      } else if (leg.mode === 'stance' && s.f === 0 && leg.err > 2 * C.BAND_TIP_ERR) {
-        startSwing(f);                                       // settle a stretched leg at rest
+      } else if (leg.mode === 'stance' && s.f === 0 && leg.err > 2 * C.BAND_TIP_ERR && mayLift()) {
+        startSwing(f); down--;                               // settle a stretched leg at rest
       }
       if (leg.mode === 'swing') advanceSwing(f, dt);
       else solveStance(f, dt);
@@ -597,7 +612,7 @@ function makeSim(rig, calib) {
   function reset(px = 0, pz = 0, heading = 0) {
     s.v.set(0, 0, 0); s.cmd.set(0, 0, 0); s.cmdT.set(0, 0, 0);
     s.vy = 0; s.heading = heading; s.yawRate = 0;
-    s.gait = 'walk'; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
+    s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
     s.airborne = false; s.rideH = calib.standH; s.gesture = null; s.pivotTarget = null;
     s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
     body.position.set(px, calib.standH, pz);
