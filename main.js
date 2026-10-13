@@ -68,7 +68,7 @@ async function init() {
   muteBtn.addEventListener('click', () => setMute(!audio.muted));
 
   const __hand = {
-    rig, scene, camera, view, controls, dbg, C, THREE, GESTURES, IDLES, props,
+    rig, scene, camera, renderer, view, controls, dbg, C, THREE, GESTURES, IDLES, props,
     solveLeg, resetToBind, tipLocal, groundY, state, calib, sim, brain,
     reset: (...a) => { brain.stop(); sim.reset(...a); },
     autoWalk: (x, z) => sim.autoWalk(x, z),
