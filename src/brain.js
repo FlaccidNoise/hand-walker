@@ -35,7 +35,8 @@ export function makeBrain(sim, rig, camera, props = null) {
   // status is what the hand is doing: idle, acting, idling or thinking. What it says or
   // reports goes out through onsay(text, kind), kind 'say' | 'notice' | 'error', and the
   // in-browser model's download through onload({state, pct, msg}): neither is a status.
-  const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null, onsay: null, onload: null };
+  // st.error holds the last plan failure until a new plan starts: the gates read it.
+  const st = { status: 'idle', detail: '', plan: [], i: -1, error: null, onstatus: null, onsay: null, onload: null };
   let bClock = 0;                                        // brain time, s sim
   // walls are visual-only in the sim; the brain is the only control path, so every
   // walk target clamps to the room interior and Thing simply never leaves
@@ -46,7 +47,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (st.onstatus) st.onstatus(st);
   };
   const say = (text, kind = 'say') => { if (st.onsay) st.onsay(text, kind); else if (kind === 'error') console.warn('[brain]', text); };
-  const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); say(msg, 'error'); };
+  const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; st.tag = null; st.error = msg; setStatus('idle'); say(msg, 'error'); };
   const settle = () => { if (st.i < 0 && st.status !== 'idle') setStatus('idle'); };   // no plan came of it: do not stay 'thinking'
 
   const ACTIONS = {
@@ -185,7 +186,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     // standing hand, and nothing else would zero the sim's walk command
     if (st.i >= 0 && !/^walk/.test(plan[0].do)) sim.autoWalk(0, 0);
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
-    st.i = 0;
+    st.i = 0; st.error = null;
     st.tag = tag;                                        // idle behaviors show 'idling', not 'acting'
     setStatus(tag ? 'idling' : 'acting', tag ?? `1/${plan.length} ${plan[0].do}`);
     return true;

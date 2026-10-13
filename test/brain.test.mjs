@@ -63,6 +63,10 @@ test('an unknown source or action fails loudly', () => {
   assert.throws(() => m.brain.command([{ do: 'jump' }], { source: 'gamepad' }), /unknown source/);
   assert.equal(m.brain.command([{ do: 'teleport' }], { source: 'click' }), false);
   assert.equal(m.brain.st.status, 'idle', 'an error is reported, not a status to live in');
+  assert.match(m.brain.st.error, /teleport/, 'and it is on record for the gates');
+  m.brain.command([{ do: 'jump' }], { source: 'click' });
+  assert.equal(m.brain.st.error, null, 'until a new plan starts');
+  m.brain.command([{ do: 'teleport' }], { source: 'click' });
   assert.equal(m.said.at(-1)[1], 'error');
   assert.match(m.said.at(-1)[0], /unknown action "teleport"/);
 });
