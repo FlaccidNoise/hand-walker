@@ -73,6 +73,7 @@ export function switchFlips(sw, hand) {
 const BOX_LANE = C.ROOM.half;
 export const BOX = { x: BOX_LANE + 0.2, z: -C.ROOM.half, w: 1.9, d: 2.5, h: 1.25 };
 BOX.x0 = BOX.x - BOX.w / 2; BOX.x1 = BOX.x + BOX.w / 2; BOX.z0 = BOX.z - BOX.d / 2; BOX.z1 = BOX.z + BOX.d / 2;
+const BOX_EXIT = BOX.z1 + BOX.h + 0.45;                       // where it stands once it is out: the front swings shut behind it
 const BOX_BED = BOX.z + 0.5;                                  // where the wrist lies: fingers to the back wall, stump inside the front
 export const inBox = (x, z) => x > BOX.x0 && x < BOX.x1 && z > BOX.z0 && z < BOX.z1;
 
@@ -292,7 +293,7 @@ export function makeProps({ scene, lights }) {
   const box = { lid: 0, flap: 0, lidT: 0, flapT: 0, rattle: -1, near: false };
   const LID_OPEN = 1.45, LID_CRACK = 0.2;                     // rad · share of it when the lid lifts a crack
 
-  const state = { lights: true, level: 1, ringT: -1 };
+  const state = { lights: true, level: 1, ringT: -1, box };   // (box: read by the checks, never written from outside)
   const axis = new THREE.Vector3();
   // `plan`: what the hand does once it stands at `anchor` facing `facing` (world heading, rad)
   const P = {
@@ -311,15 +312,19 @@ export function makeProps({ scene, lights }) {
       } },
     // home. Used from outside: walk in, lie down with its back to the room, and the box
     // shuts on it. `at` = [gesture s, event]: the brain fires them as the gesture plays.
-    // `out` is the way back: it turns round unseen (a hand turning in there swept its
+    // `out` is the way back: it turns to the front unseen (a hand turning in there swept its
     // fingers through the side: filmed), sits up under the lid, and the front drops before
-    // it stands. `open` fires as the hand sets off, so the front is down when it arrives
+    // it stands. `leave` is the last of it: out by the front to BOX_EXIT, clear of the front's
+    // swing (it shut on a hand standing at 0.95: the front is 1.25 high), and the box shuts.
+    // `open` fires as the hand sets off, so the front is down when it arrives. `box: true`
+    // marks the actions that belong in the box: the brain keeps other walks out of it
     box: { label: 'box', mesh: boxG, solid: BOX, anchor: { x: BOX_LANE, z: BOX.z1 + 0.75 }, facing: Math.PI / 2, open: 'boxOpen',
       plan: () => [{ do: 'walkTo', x: BOX_LANE, z: BOX_BED, speed: C.SPEED.strut },
         { do: 'gesture', name: 'nestle', at: [[1.1, 'boxShut'], [1.8, 'hide']] }],
-      out: () => [{ do: 'turn', deg: 180 },
-        { do: 'gesture', name: 'emerge', at: [[0.2, 'boxRattle'], [0.7, 'boxRattle'], [1.2, 'boxCrack'], [1.25, 'show'], [2.0, 'boxLid'], [2.8, 'boxOpen']] },
-        { do: 'walkTo', x: BOX_LANE, z: BOX.z1 + 0.95, speed: C.SPEED.strut }, { do: 'gesture', name: 'stretch', fire: 'boxShut' }] },
+      leave: () => [{ do: 'walkTo', x: BOX_LANE, z: BOX_EXIT, speed: C.SPEED.strut, fire: 'boxOpen', box: true }, { do: 'gesture', name: 'stretch', fire: 'boxShut', box: true }],
+      out() { return [{ do: 'face', heading: -Math.PI / 2, box: true },
+        { do: 'gesture', name: 'emerge', box: true, at: [[0.2, 'boxRattle'], [0.7, 'boxRattle'], [1.2, 'boxCrack'], [1.25, 'show'], [2.0, 'boxLid'], [2.8, 'boxOpen']] },
+        ...this.leave()]; } },
   };
   // things that happen in the room are told to whoever listens (the brain: the hand reacts).
   // Events go out, hand state never comes in

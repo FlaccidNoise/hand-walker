@@ -36,15 +36,44 @@ try {
       // rock, paper, scissors: thrown alone, and with a pick typed during the count-in
       { name: 'rps', start: () => h.brain.command([{ do: 'rps' }], { source: 'click' }) },
       { name: 'rps, then a pick', start: () => { const ok = h.brain.command([{ do: 'rps' }], { source: 'click' }); pump(1.2); h.brain.ask('paper'); return ok && h.brain.st.i >= 0 && h.brain.rps.you === 'paper'; } },
+      // the box, interrupted: going home and coming out, cut into at nine points by a typed
+      // "come out", a click on the floor and an emote key. Whatever happens, the hand and
+      // the box must agree at the end (boxAgrees, checked after EVERY plan here)
+      ...[['walking in', 'home', () => h.brain.st.plan[h.brain.st.i]?.do === 'walkTo' && h.props.get('box').solid.z1 > h.rig.mount.position.z],
+        ['nestle 0.5 s', 'home', () => gT('nestle') >= 0.5], ['nestle 1.4 s', 'home', () => gT('nestle') >= 1.4], ['nestle 2.2 s', 'home', () => gT('nestle') >= 2.2],
+        ['turning', 'out', () => h.brain.st.plan[h.brain.st.i]?.do !== 'gesture' && h.brain.st.plan[h.brain.st.i]?.t > 0.05],
+        ['emerge 0.5 s', 'out', () => gT('emerge') >= 0.5], ['emerge 1.6 s', 'out', () => gT('emerge') >= 1.6], ['emerge 2.4 s', 'out', () => gT('emerge') >= 2.4],
+        ['walking out', 'out', () => h.rig.mount.visible && !h.sim.s.gesture && h.sim.s.speed > 0.3]]
+        .flatMap(([when, what, pred]) => [['come out', () => h.brain.ask('come out')], ['a floor click', () => h.brain.command([{ do: 'walkTo', x: 0, z: 0, speed: 0.8 }], { source: 'click' })],
+          ['a key', () => h.brain.command([{ do: 'gesture', name: 'yes' }], { source: 'key' })]].map(([by, cut]) => ({ name: `box ${what}, ${when}: ${by}`, start: () => {
+            home();
+            if (what === 'out') { until(() => h.brain.st.i < 0 && !h.sim.s.gesture, 40); h.brain.command([{ do: 'routine', name: 'out' }], { source: 'click' }); }
+            if (!until(pred, 40)) return false;
+            cut();
+            return true;
+          } }))),
       // a key or a poke that lands mid-walk: the walk must stop, not carry the hand out of the room
       ...[['key', () => h.brain.command([{ do: 'gesture', name: 'wave' }], { source: 'key' })], ['poke', () => h.brain.poke()], ['jump', () => h.brain.command([{ do: 'jump' }], { source: 'key' })]]
         .map(([n, then]) => ({ name: `walk, then ${n}`, start: () => { h.brain.command([{ do: 'walkTo', x: -3, z: 2, speed: 1.8 }], { source: 'click' }); pump(1.2); return then(); } }))];
+    const gT = (name) => h.sim.s.gesture && h.sim.s.gesture.name === name ? h.sim.s.gesture.t : -1;
+    const home = () => h.brain.command([{ do: 'routine', name: 'home' }], { source: 'click' });
+    const until = (pred, limit) => { for (let t = 0; t < limit; t += 0.05) { if (pred()) return true; pump(0.05); } return false; };
+    // the hand and its box agree: hidden means shut in, visible means not inside (or in the
+    // way of) a box that is not open, and the box is never left ajar
+    const boxAgrees = () => {
+      const bx = h.props.state.box, k = h.props.get('box').solid, B = h.rig.mount.position, vis = h.rig.mount.visible;
+      const open = bx.lidT === 1 && bx.flapT === 1, shut = bx.lidT === 0 && bx.flapT === 0;
+      const inside = B.x > k.x0 && B.x < k.x1 && B.z > k.z0 && B.z < k.z1, onFlap = B.x > k.x0 && B.x < k.x1 && B.z >= k.z1 && B.z < k.z1 + k.h + 0.33;
+      return !open && !shut ? 'the box is left ajar' : !vis ? (inside && shut ? null : 'the hand is hidden but not shut in its box')
+        : inside && !open ? 'the hand stands, visible, inside a shut box' : onFlap && shut ? 'the front of the box shut on the hand' : null;
+    };
     for (const p of plans) {
       if (!p.keep) { h.reset(); pump(1); }
       const t0 = h.sim.s.time;
       let err = p.start() ? null : `did not start: ${h.brain.st.error}`;
       while (!err && h.brain.st.i >= 0 && h.sim.s.time - t0 < LIMIT) { pump(0.25); err = h.brain.st.error; }
       if (!err && h.brain.st.i >= 0) err = `still running after ${LIMIT} s (${h.brain.st.detail})`;
+      if (!err) { until(() => !h.sim.s.gesture, 8); pump(0.3); err = boxAgrees(); }
       const B = h.rig.mount.position, out0 = Math.max(Math.abs(B.x), Math.abs(B.z)) - h.C.ROOM.half;
       if (!err && out0 > 0.3) err = `ended ${out0.toFixed(1)} u outside the room`;
       out.push({ name: p.name, s: +(h.sim.s.time - t0).toFixed(1), err });
