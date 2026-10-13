@@ -156,17 +156,42 @@ export function makeProps({ scene, lights }) {
   lamp.position.set(-W + 0.25, 2.1, -3.5); scene.add(lamp);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: PAINT.glow(), blending: THREE.AdditiveBlending, depthWrite: false }));
   glow.scale.setScalar(1.5); glow.position.copy(lamp.position); scene.add(glow);
-  // moonlight through the doorway, laid on the floor as light: unlit and additive
+  // moonlight through the doorway, laid on the floor as light. A ShadowMaterial turned
+  // inside out: it adds light where the key's shadow map says lit, fading from the sill
+  // (uv.y), so the hand's shadow runs unbroken through the patch
   const moonG = new THREE.BufferGeometry();
   moonG.setAttribute('position', new THREE.Float32BufferAttribute([-0.8, 0, -W, 0.8, 0, -W, 1.9, 0, 3.4 - W, 0.2, 0, 3.4 - W], 3));
   moonG.setAttribute('uv', new THREE.Float32BufferAttribute([0, 1, 1, 1, 1, 0, 0, 0], 2));
-  moonG.setIndex([0, 2, 1, 0, 3, 2]);
-  const moon = new THREE.Mesh(moonG, new THREE.MeshBasicMaterial({ map: PAINT.moon(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-  moon.position.y = 0.012; scene.add(moon);
+  moonG.setIndex([0, 2, 1, 0, 3, 2]); moonG.computeVertexNormals();
+  const moon = new THREE.Mesh(moonG, new THREE.ShadowMaterial({ color: 0x6e96ff, blending: THREE.AdditiveBlending, depthWrite: false }));
+  moon.material.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('void main() {', 'varying float vFade;\nvoid main() {\n\tvFade = uv.y;');
+    sh.fragmentShader = sh.fragmentShader.replace('void main() {', 'varying float vFade;\nvoid main() {')
+      .replace('1.0 - getShadowMask()', 'getShadowMask() * vFade');
+  };
+  moon.position.y = 0.012; moon.receiveShadow = true; scene.add(moon);
+  // dust in that beam: a few motes on slow sines. Placed by a hash, never Math.random:
+  // the gates seed that stream and must find it where they left it
+  const MOTES = 48, hash = (i, k) => { const v = Math.sin(i * 127.1 + k * 311.7) * 43758.5453; return v - Math.floor(v); };
+  const dust = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(MOTES * 3), 3)),
+    new THREE.PointsMaterial({ color: 0x9db8ff, size: 0.025, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  dust.frustumCulled = false; scene.add(dust);
+  const drift = (t) => {
+    const p = dust.geometry.attributes.position;
+    for (let i = 0; i < MOTES; i++) {
+      const d = 0.2 + 3 * hash(i, 2), top = 1.5 * (1 - d / 3.4);            // the beam slants down and to +x as it leaves the door
+      p.setXYZ(i, -0.7 + 1.4 * hash(i, 1) + 0.32 * d + 0.12 * Math.sin(t * 0.21 + 6.28 * hash(i, 4)),
+        (0.1 + 0.9 * hash(i, 3)) * top + 0.08 * Math.sin(t * 0.17 + 6.28 * hash(i, 5)), d - W);
+    }
+    p.needsUpdate = true;
+  };
+  drift(0);
+  const calm = matchMedia('(prefers-reduced-motion: reduce)');
+  let clock = 0;
   // what the switch eases between: the room as scene.js lit it, and a night of moon and sconce
   const lit = { hemi: lights.hemi.intensity, key: lights.key.intensity, amb: lights.amb.intensity, rim: lights.rim.intensity,
-    env: scene.environmentIntensity, lamp: 0, shade: 0.9, glow: 0.45, moon: 0.35, toggle: 0 };
-  const dark = { hemi: 0.105, key: 0.62, amb: 0.04, rim: 0.5, env: 0.03, lamp: 14, shade: 2.2, glow: 0.9, moon: 0.8, toggle: 1 };
+    env: scene.environmentIntensity, lamp: 0, shade: 0.9, glow: 0.45, moon: 0.19, dust: 0.3, toggle: 0 };
+  const dark = { hemi: 0.105, key: 0.8, amb: 0.04, rim: 0.5, env: 0.03, lamp: 14, shade: 2.2, glow: 0.9, moon: 0.44, dust: 0.8, toggle: 1 };
   const keyLit = lights.key.color.clone(), keyDark = new THREE.Color(0x7f9ce0);   // the key turns to moonlight: the hand keeps its shadow
 
   // desk bell, front left
@@ -205,9 +230,10 @@ export function makeProps({ scene, lights }) {
     part.position.set(x, 0.006, z); part.receiveShadow = true; pianoG.add(part);
     return part;
   };
-  const ebony = mat(0x0d0b0a, { roughness: 0.3 }), len = PIANO.notes.length * PIANO.keyW, zMid = PIANO.z0 + len / 2;
+  // matt blacks: the camera stands in the moon rim's mirror direction, so polished black turns blue
+  const ebony = mat(0x0d0b0a, { roughness: 0.9 }), len = PIANO.notes.length * PIANO.keyW, zMid = PIANO.z0 + len / 2;
   for (const i of [0, 1, 3, 4, 5]) flat(0.62, 0.2, PIANO.x0 + 0.31, PIANO.z0 + (i + 1) * PIANO.keyW, ebony).position.y = 0.02;   // the black keys
-  flat(W - 0.01 + PIANO.x0 - 0.05, len + 0.3, (PIANO.x0 - 0.05 - W + 0.01) / 2, zMid, mat(0x150d09, { roughness: 0.35 }));     // lacquer back to the wall
+  flat(W - 0.01 + PIANO.x0 - 0.05, len + 0.3, (PIANO.x0 - 0.05 - W + 0.01) / 2, zMid, ebony);   // the case, back to the wall
   flat(0.05, len + 0.06, PIANO.x0 - 0.025, zMid, mat(0x6a1418, { roughness: 1 }));                                             // felt
   scene.add(pianoG);
   const zLo = PIANO.z0 - 0.5, zHi = PIANO.z0 + PIANO.notes.length * PIANO.keyW + 0.5, xMid = (PIANO.x0 + PIANO.x1) / 2;
@@ -266,13 +292,15 @@ export function makeProps({ scene, lights }) {
         if (state.ringT > 1) { state.ringT = -1; dome.scale.y = 1; }
       }
       // lights ease between the lit room and a night of moonlight and the sconce
-      state.level += ((state.lights ? 1 : 0) - state.level) * (1 - Math.exp(-dt / 0.12));
+      state.level += ((state.lights ? 1 : 0) - state.level) * (1 - Math.exp(-dt / 0.28));   // a filament, not a relay
       const at = (k) => dark[k] + (lit[k] - dark[k]) * state.level;
       lights.hemi.intensity = at('hemi'); lights.key.intensity = at('key'); lights.amb.intensity = at('amb');
       lights.rim.intensity = at('rim'); scene.environmentIntensity = at('env');
       lights.key.color.lerpColors(keyDark, keyLit, state.level);
-      lamp.intensity = at('lamp'); shade.material.emissiveIntensity = at('shade'); glow.material.opacity = at('glow');
-      moon.material.opacity = at('moon'); toggle.material.emissiveIntensity = at('toggle');
+      if (!calm.matches) drift(clock += dt);
+      const f = calm.matches ? 1 : 1 + 0.06 * Math.sin(clock * 9.1) * Math.sin(clock * 2.3);          // the sconce's flame breathes
+      lamp.intensity = at('lamp') * f; shade.material.emissiveIntensity = at('shade') * f; glow.material.opacity = at('glow') * f;
+      moon.material.opacity = at('moon'); dust.material.opacity = at('dust'); toggle.material.emissiveIntensity = at('toggle');
     },
     // which prop is under this ray (for clicks), or null
     pick(raycaster) {

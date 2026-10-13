@@ -117,7 +117,7 @@ export function buildScene(container) {
     const u = THREE.MathUtils.clamp((1 - k) / (1 - ZOOM_MIN), 0, 1);     // 0 = the whole room, 1 = on the hand
     // the nearer the lens, the more of the hand's position the target takes
     const w = calm && u === 0 ? 0 : THREE.MathUtils.lerp(FOLLOW + FOLLOW_TALL * view.tall, 0.92, u);
-    want.set(hand.x * w, 0.45 * u, hand.z * w);
+    want.set(hand.x * w - view.target.x * u, 0.45 * u, hand.z * w - view.target.z * u);   // fully in, the hand is the centre
     const a = 1 - Math.exp(-dt / (k < dolly ? 0.4 : 0.7));   // in quicker than out
     off.lerp(want, 1 - Math.exp(-dt / 0.5)); dolly += (k - dolly) * a;
     view.shake = calm ? 0 : Math.max(0, view.shake - dt / 0.22);         // a knock rattles the glass
