@@ -89,7 +89,7 @@ CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm t
 ```
 index.html      import map + canvas
 main.js         page loop, sim core, calibration
-src/rig.js      finger/joint skeleton
+src/rig.js      finger/joint skeleton, the hand's skin and stitched wrist
 src/ik.js       leg solver, curl, ground constraint
 src/gait.js     per-digit duty and stride budget
 src/gestures.js gesture and emote pose tracks
@@ -101,8 +101,9 @@ src/props.js    light switch, bell, ball, rug, floor piano, all sound
 src/tuning.js   every constant
 src/terrain.js  procedural ground height
 src/scene.js    room, lighting, camera
+src/paint.js    the room's textures, painted on canvases at startup
 vendor/         pinned three.js — do not edit by hand
-scripts/        dev server, headless gates, filmstrip tool
+scripts/        dev server, headless gates, filmstrip tool, reel.mjs (video of the real page)
 docs/           plans, research, and REBUILD-SPEC.md (the original design)
 ```
 

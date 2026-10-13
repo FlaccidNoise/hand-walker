@@ -102,9 +102,6 @@ export const PAINT = {
     g.fillStyle = '#120c09'; g.fillRect(116, 60, 8, 400); g.fillRect(60, 250, 120, 8);
   }),
 
-  // moonlight coming in at the door: bright at the sill, gone a few steps in
-  moon: () => tex(8, 256, g => { g.fillStyle = grad(g, 0, 0, 0, 256, [[0, 'rgba(110,150,255,0.55)'], [1, 'rgba(110,150,255,0)']]); g.fillRect(0, 0, 8, 256); }),
-
   book: () => tex(256, 256, g => {
     g.fillStyle = '#4a1616'; g.fillRect(0, 0, 256, 256);
     g.strokeStyle = g.fillStyle = '#b08d4a'; g.textAlign = 'center';
