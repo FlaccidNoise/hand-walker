@@ -8,7 +8,8 @@ import { groundY } from './src/terrain.js';
 import { GESTURES, IDLES, sampleTrack } from './src/gestures.js';
 import { makeBrain } from './src/brain.js';
 import { initInput } from './src/input.js';
-import { makeProps, SOUNDS, audio, unlockAudio } from './src/props.js';
+import { makeProps, SOUNDS } from './src/props.js';
+import { initUI } from './src/ui.js';
 import { DebugDraw } from './src/debug.js';
 import * as M from './src/math.js';
 import { digitRatio, strideBudget, digitDuty } from './src/gait.js';
@@ -27,17 +28,26 @@ const state = {
 };
 
 async function init() {
-  const { renderer, scene, camera, camHome, controls, lights } = buildScene(app);
+  let built;
+  try { built = buildScene(app); }
+  catch (e) {
+    console.error('no WebGL context, so the page cannot draw: use a current browser with hardware acceleration on.', e);
+    window.__fatal('This page needs WebGL. Try a current Chrome, Firefox or Safari.');
+    return;
+  }
+  const { renderer, scene, camera, camHome, controls, lights } = built;
   const dbg = new DebugDraw(scene);
   dbg.visible = false;
+  const props = makeProps({ scene, lights });
+  renderer.render(scene, camera);                            // the room shows while the hand loads
 
   let rig;
   try {
     rig = await buildRig('./assets/generic-hand-left.glb', C.HANDEDNESS);
   } catch (e) {
-    console.error('rig load failed', e);
+    console.error('rig load failed: check that assets/generic-hand-left.glb is served, then reload.', e);
     state._rigErr = (e && (e.stack || e.message)) || String(e);
-    hud.textContent = 'RIG LOAD FAILED: ' + state._rigErr;
+    window.__fatal('The hand did not load.');
     return;
   }
   state.rig = rig;
@@ -50,23 +60,17 @@ async function init() {
 
   const sim = makeSim(rig, calib);
   sim.reset();
-  const props = makeProps({ scene, lights });
   const brain = makeBrain(sim, rig, camera, props);
+  const ui = initUI({ renderer, camera, rig, sim, brain, dev: DEV });
   // gesture cues: sounds, and the double snap that works any `remote` prop from afar
   let shake = 0;                                             // camera shake, 1 → 0 (a knock on the glass)
   sim.onCue = (name) => {
     if (name === 'remote') props.fire('switch');
     else if (SOUNDS[name]) SOUNDS[name]();
     if (name === 'knock' && !matchMedia('(prefers-reduced-motion: reduce)').matches) shake = 1;
+    ui.cue();
   };
   sim.onStep = (f, foot) => props.footfall(f, foot.x, foot.z, sim.s.speed);
-  // sound starts with the first key or pointer press (browsers refuse it before that)
-  const EARS = ['pointerup', 'keydown', 'click'];
-  const hear = () => { if (unlockAudio()) for (const t of EARS) removeEventListener(t, hear); };
-  for (const t of EARS) addEventListener(t, hear);
-  const muteBtn = document.getElementById('muteBtn');
-  const setMute = (m) => { audio.muted = m; muteBtn.textContent = m ? 'sound off' : 'sound on'; muteBtn.setAttribute('aria-pressed', String(m)); };
-  muteBtn.addEventListener('click', () => setMute(!audio.muted));
 
   const __hand = {
     rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES, props,
@@ -80,72 +84,15 @@ async function init() {
   };
   window.__hand = __hand;
 
-  const input = initInput({ renderer, camera, controls, scene, rig, brain, props });
+  const input = initInput({ renderer, camera, controls, scene, rig, brain, props, ui });
 
-  // dev keys (movement, emotes and clicks live in src/input.js)
-  addEventListener('keydown', (e) => {
+  // dev keys (movement, emotes and clicks live in src/input.js, page keys in src/ui.js)
+  if (DEV) addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (DEV && k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
-    if (k === 'm' && e.target.tagName !== 'INPUT') setMute(!audio.muted);
-    if (DEV && k === 'p') state.paused = !state.paused;
-    if (DEV && k === 'r') { brain.stop(); sim.reset(); }
+    if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
+    if (k === 'p') state.paused = !state.paused;
+    if (k === 'r') { brain.stop(); sim.reset(); }
   });
-
-  // talk UI: hold V = push-to-talk (Web Speech STT), or type a command. Space jumps.
-  const talkState = document.getElementById('talkState');
-  const talkText = document.getElementById('talkText');
-  const setTalk = (msg, err = false) => { talkState.textContent = msg; talkState.className = err ? 'err' : ''; };
-  // a touch screen has no V key to hold: say what works there
-  const TOUCH = matchMedia('(pointer: coarse)').matches;
-  let talkIdle = TOUCH ? 'tap the floor, the hand, or a button' : 'hold V to talk';
-  setTalk(talkIdle);
-  // the in-browser model downloads only after this button is pressed (it is the consent)
-  const brainBtn = document.getElementById('brainBtn');
-  brainBtn.addEventListener('click', () => { brainBtn.hidden = true; brain.loadLocal(); });
-  brain.st.onstatus = (st) => {
-    setTalk(st.status === 'idle' ? talkIdle : `${st.status} ${st.detail}`, st.status === 'error');
-    brainBtn.hidden = !brain.needsLocal;
-  };
-  // the buttons say their line through the same door as typing and speech
-  for (const b of document.querySelectorAll('#keys [data-say]')) b.addEventListener('click', () => { brain.ask(b.dataset.say); b.blur(); });
-  talkText.addEventListener('keydown', (e) => {
-    e.stopPropagation();
-    if (e.key === 'Enter' && talkText.value.trim()) { brain.ask(talkText.value.trim()); talkText.value = ''; }
-  });
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { if (!TOUCH) setTalk('no speech recognition in this browser — type a command below', true); }
-  else {
-    let rec = null, transcript = '', micErr = false, micBlocked = false;
-    // a host can switch the microphone off for the whole page (a Permissions-Policy
-    // header): then V cannot work, so do not offer it
-    navigator.permissions?.query({ name: 'microphone' }).then((p) => {
-      if (p.state !== 'denied') return;
-      micBlocked = true;
-      if (!TOUCH) { talkIdle = 'type a command, or use the buttons'; if (brain.st.status === 'idle') setTalk(talkIdle); }
-    }).catch(() => {});                                      // no such permission name here: V stays on offer
-    addEventListener('keydown', (e) => {
-      if (e.code !== 'KeyV' || e.repeat || e.target === talkText || rec) return;
-      if (micBlocked) { setTalk('the microphone is blocked on this page: type a command', true); return; }
-      e.preventDefault();
-      transcript = ''; micErr = false;
-      rec = new SR();
-      rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true;
-      rec.onresult = (ev) => {
-        transcript = [...ev.results].map(r => r[0].transcript).join(' ').trim();
-        setTalk(`listening: ${transcript || '…'}`);
-      };
-      rec.onerror = (ev) => { micErr = true; setTalk(`mic error: ${ev.error}`, true); };
-      rec.onend = () => {
-        if (transcript) brain.ask(transcript);
-        else if (!micErr && brain.st.status === 'idle') setTalk(talkIdle);
-      };
-      rec.start();
-      setTalk('listening: …');
-    });
-    addEventListener('keyup', (e) => {
-      if (e.code === 'KeyV' && rec) { rec.stop(); rec = null; }
-    });
-  }
 
   // camera is the fixed diorama view set in buildScene — nothing to do here
 
@@ -177,6 +124,7 @@ async function init() {
       camera.position.set(camHome.x + 0.05 * shake * Math.sin(clock.elapsedTime * 95), camHome.y + 0.04 * shake * Math.sin(clock.elapsedTime * 71), camHome.z);
     }
     renderer.render(scene, camera);
+    ui.update(dt);                                           // after the render: it reads this frame's camera
     if (state.debug) drawDebug(dbg, rig, sim);
     frames++; fpsT += dt;
     if (fpsT > 0.5) {

@@ -32,18 +32,22 @@ function parseFirstJSON(text) {
 
 export function makeBrain(sim, rig, camera, props = null) {
   const body = rig.mount;
-  const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null };
+  // status is what the hand is doing: idle, acting, idling or thinking. What it says or
+  // reports goes out through onsay(text, kind), kind 'say' | 'notice' | 'error', and the
+  // in-browser model's download through onload({state, pct, msg}): neither is a status.
+  const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null, onsay: null, onload: null };
   let bClock = 0;                                        // brain time, s sim
   // walls are visual-only in the sim; the brain is the only control path, so every
   // walk target clamps to the room interior and Thing simply never leaves
   const ROOM = C.ROOM.half;
   const clampRoom = (p) => ({ x: M.clamp(p.x, -ROOM, ROOM), z: M.clamp(p.z, -ROOM, ROOM) });
-  let statusAt = 0;                                      // bClock when the status last changed
   const setStatus = (status, detail = '') => {
-    st.status = status; st.detail = detail; statusAt = bClock;
+    st.status = status; st.detail = detail;
     if (st.onstatus) st.onstatus(st);
   };
-  const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; setStatus('error', msg); };
+  const say = (text, kind = 'say') => { if (st.onsay) st.onsay(text, kind); else if (kind === 'error') console.warn('[brain]', text); };
+  const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); say(msg, 'error'); };
+  const settle = () => { if (st.i < 0 && st.status !== 'idle') setStatus('idle'); };   // no plan came of it: do not stay 'thinking'
 
   const ACTIONS = {
     wait(a, dt) {
@@ -173,7 +177,7 @@ export function makeBrain(sim, rig, camera, props = null) {
       const far = Math.hypot(p.anchor.x - body.position.x, p.anchor.z - body.position.z) > 2.5;
       const go = [{ do: 'walkTo', x: p.anchor.x, z: p.anchor.z, speed: p.speed ?? (far ? C.SPEED.scuttle : C.SPEED.strut) }];
       if (p.facing != null) go.push({ do: 'face', heading: p.facing });
-      return [...go, ...p.plan()];
+      return [...go, ...p.plan()].map(b => ({ ...b, for: a.target }));   // `for`: the page names the errand
     });
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
@@ -270,8 +274,6 @@ export function makeBrain(sim, rig, camera, props = null) {
   }
   function tick(dt) {
     bClock += dt;
-    // 'saying' and 'error' are not states to live in: idle behaviors need 'idle'
-    if (st.i < 0 && (st.status === 'saying' || st.status === 'error') && bClock - statusAt > C.STATUS_HOLD) setStatus('idle');
     maybeBehave();
     if (st.i < 0) return;
     const a = st.plan[st.i];
@@ -321,22 +323,24 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
   let llmDown = false;                                   // set once /llm proves unreachable
   // run a rules plan. `noModel`: say so when there is no rule and no LLM to ask.
   function obey(plan, noModel = false) {
-    if (plan && !plan.length) return { plan };           // "stop": ask() already stopped
-    if (plan) { command(plan, { source: 'voice' }); return { plan }; }
+    if (plan && !plan.length) { settle(); return { plan }; }   // "stop": ask() already stopped
+    if (plan) { command(plan, { source: 'voice' }); settle(); return { plan }; }
     if (noModel) {
       command([{ do: 'gesture', name: 'idk' }], { source: 'voice' });
-      const how = local.ready ? 'I did not follow that.'
-        : local.supported ? `No language model yet: press "load brain" (${LOCAL_MODEL.size}, runs in this browser).`
-        : 'No language model on this page.';
-      setStatus('saying', `${how} Try: wave, go to the door, turn around, jump, take a nap.`);
+      say(local.ready ? 'I did not follow that.' : 'I only know simple words. Try "wave", "go to the door", "play the piano".', 'notice');
     }
-    return null;
+    settle();
+    return { lost: true };                               // not understood: the page may show what works
   }
   // the in-browser model (src/llm.js): the LLM for a static host. Loaded on request only.
-  const local = makeLocalLLM((msg) => setStatus('thinking', msg));
+  const loading = (o) => { if (st.onload) st.onload(o); };
+  const local = makeLocalLLM((pct) => loading({ state: 'loading', pct }));
   async function loadLocal() {
-    try { await local.load(); setStatus('saying', 'Brain loaded. Ask me anything.'); return true; }
-    catch (e) { setStatus('error', `in-browser brain: ${e.message || e}`); return false; }
+    try { await local.load(); loading({ state: 'ready' }); say('Brain loaded. Ask me anything.', 'notice'); return true; }
+    catch (e) {
+      console.warn(`[brain] the in-browser model (${LOCAL_MODEL.id}) did not load: check the network and WebGPU, then press the button again.`, e);
+      loading({ state: 'error', msg: String(e.message || e) }); return false;
+    }
   }
   async function askLocal(text, gen, rules) {
     setStatus('thinking', text);
@@ -345,8 +349,9 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       plan = isQuestion(text) ? [{ do: 'gesture', name: await local.answer(text) }]
         : await local.plan(text, body.position);
     } catch (e) {
-      if (gen === askGen) setStatus('error', `in-browser brain: ${e.message || e}`);
-      return null;
+      if (gen !== askGen) return null;
+      console.warn('[brain] the in-browser model gave no usable reply: the keyword rules answer instead.', e);
+      return obey(rules, true);
     }
     return gen === askGen ? obey(plan ?? rules, true) : null;
   }
@@ -383,17 +388,19 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
         llmDown = true;
         return local.ready ? askLocal(text, gen, rules) : obey(rules, true);
       }
-      setStatus('error', e.name === 'AbortError' ? 'brain timed out (20s)' : String(e.message || e));
+      console.warn('[brain] /llm failed: check that scripts/serve.py runs with GEMINI_API_KEY set.', e);
+      settle();
+      say(e.name === 'AbortError' ? 'That took too long. Try again.' : 'The language model is not answering. Simple commands still work.', 'notice');
       return null;
     }
     if (gen !== askGen) return null;                     // superseded while the LLM was thinking
     history.push({ role: 'model', parts: [{ text: JSON.stringify(reply) }] });
-    if (reply.say) {
-      setStatus('saying', reply.say);
-      speak(reply.say);                                  // fire-and-forget: plan runs meanwhile
-    }
-    if (Array.isArray(reply.plan) && reply.plan.length) command(reply.plan.slice(0, 20), { source: 'voice' });
-    else if (!reply.say) setStatus('error', 'brain returned no plan and nothing to say');
+    const plan = Array.isArray(reply.plan) && reply.plan.length ? reply.plan.slice(0, 20) : null;
+    // a plan outranked by a hand on the controls takes its words with it: no say without the deed
+    if (plan && !command(plan, { source: 'voice' })) return null;
+    if (reply.say) { say(reply.say); speak(reply.say); } // fire-and-forget: plan runs meanwhile
+    else if (!plan) { console.warn('[brain] /llm returned no plan and nothing to say:', reply); say('I have nothing to say to that.', 'notice'); }
+    settle();
     return reply;
   }
 
@@ -402,8 +409,9 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
   // analysis says little: mean|Δ| 568 vs 14122). Style + voice are the persona.
   const TTS_VOICE = 'Charon';
   const TTS_STYLE = 'Say in a warm, dry, upper-class British male accent, like a tiny distinguished butler: ';
-  let audioCtx = null;
+  let audioCtx = null, muted = false;
   async function speak(text) {
+    if (muted) return;
     try {
       const res = await fetch('/tts', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -425,7 +433,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       const src = audioCtx.createBufferSource();
       src.buffer = buf; src.connect(audioCtx.destination); src.start();
     } catch (e) {
-      setStatus('error', `voice: ${String(e.message || e)}`);   // visible, then degrade
+      console.warn('[brain] /tts failed: the browser voice speaks instead.', e);
       if (typeof speechSynthesis !== 'undefined') {
         const u = new SpeechSynthesisUtterance(text);
         u.pitch = 1.6; u.rate = 1.15;
@@ -433,7 +441,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke,
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, mute: (m) => { muted = m; },
     get idle() { return st.i < 0 && st.status === 'idle'; },
     behaviors: BEHAVIORS.map(b => b.name), routines: Object.keys(ROUTINES),
     get needsLocal() { return llmDown && local.supported && !local.ready; } };

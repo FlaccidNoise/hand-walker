@@ -2,67 +2,216 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>Hand Walker</title>
 <link rel="icon" href="data:," />
 <style>
-  html,body { margin:0; height:100%; background:#0c1018; overflow:hidden; font:13px/1.4 ui-monospace,monospace; color:#d8dce6; }
+  :root { --ink:#e8dcc4; --ink2:#b9a888; --card:#1a1310; --line:#6b5330; --edge:#8a6c3d; --brass:#c9a35a; --ring:#e8c98a; --tap:36px;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif; }
+  @media (pointer:coarse) { :root { --tap:44px; } }
+  html,body { margin:0; height:100%; background:#0b0908; overflow:hidden; overscroll-behavior:none; font:14px/1.4 var(--serif); color:var(--ink); }
+  body { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   #app { position:fixed; inset:0; }
-  #hud { position:fixed; left:8px; top:8px; pointer-events:none; white-space:pre; text-shadow:0 1px 2px #000; }
-  #hud b { color:#8fe0ff; }
-  #help { position:fixed; right:8px; top:8px; opacity:.7; text-align:right; pointer-events:none; }
-  #dock { position:fixed; left:50%; bottom:10px; transform:translateX(-50%); display:flex; flex-direction:column; gap:8px; align-items:center; width:max-content; max-width:calc(100vw - 16px); }
-  #keys { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
-  #keys button { background:#141a26cc; color:#d8dce6; border:1px solid #2a3346; border-radius:999px; padding:5px 11px; font:inherit; cursor:pointer; }
-  #keys button:hover { background:#22304a; border-color:#3a4a6a; }
-  #keys button:focus-visible, #brainBtn:focus-visible, #talkText:focus-visible { outline:2px solid #8fe0ff; outline-offset:1px; }
-  #keys #muteBtn { opacity:.75; }
-  #talk { display:flex; gap:10px; align-items:center; background:#141a26cc; border:1px solid #2a3346; border-radius:8px; padding:8px 12px; max-width:100%; box-sizing:border-box; }
-  @media (max-height:500px) {                 /* a phone on its side: keep the room in view */
-    #help, #talkText { display:none; }
-    #dock { gap:4px; bottom:6px; }
-    #talk { padding:3px 10px; background:none; border:none; }
-    #talkState { min-width:0; }
-  }
-  @media (max-width:760px) {
-    #help { display:none; }
-    #talk { flex-wrap:wrap; justify-content:center; }
-    #talkState { min-width:0; text-align:center; flex-basis:100%; }
-  }
-  #talkState { min-width:220px; }
-  #talkState.err { color:#ff8f8f; }
-  #brainBtn { background:#22304a; color:#d8dce6; border:1px solid #3a4a6a; border-radius:4px; padding:4px 8px; font:inherit; cursor:pointer; }
-  #talkText { background:#0c1018; color:#d8dce6; border:1px solid #2a3346; border-radius:4px; padding:4px 8px; width:220px; font:inherit; }
   canvas { display:block; }
+  #vig, #grain { position:fixed; inset:0; pointer-events:none; }
+  #vig { background:radial-gradient(ellipse 75% 70% at 50% 46%, transparent 55%, rgba(4,3,3,.78) 100%); }
+  #grain { background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity:.07; mix-blend-mode:overlay; }
+  #hud { position:fixed; left:8px; top:8px; pointer-events:none; white-space:pre; text-shadow:0 1px 2px #000; font:13px/1.4 ui-monospace,monospace; color:#d8dce6; }
+  #hud b { color:#8fe0ff; }
+  [hidden] { display:none !important; }
+  button, input { font:inherit; color:inherit; }
+  button { cursor:pointer; }
+  :focus-visible { outline:2px solid var(--ring); outline-offset:2px; }
+  kbd { font:inherit; font-variant:normal; color:var(--ring); }
+  .card { background:#1a1310e6; border:1px solid var(--line); border-radius:3px; }
+
+  /* what this is: top left. It steps back after the first input. */
+  #title { position:fixed; left:16px; top:12px; pointer-events:none; transition:opacity 1.2s; }
+  #title h1 { margin:0; font-size:20px; font-weight:600; font-variant:small-caps; letter-spacing:.07em; }
+  #title p { margin:0; font-size:13px; font-style:italic; color:var(--ink2); }
+  #title.quiet { opacity:.45; }
+  #hud:not(:empty) ~ #title { display:none; }
+
+  /* sound and help: top right */
+  #top { position:fixed; right:14px; top:14px; display:flex; gap:10px; align-items:center; }
+  #top button { width:var(--tap); height:var(--tap); padding:0; border-radius:50%; border:1px solid var(--line); background:#1a1310cc; color:var(--ring); font-size:16px; }
+  #top button:hover { border-color:var(--brass); background:#2a1d14; }
+  #soundTip { font-size:13px; font-style:italic; color:var(--ink2); pointer-events:none; }
+  #muteBtn.off { color:var(--ink2); text-decoration:line-through; }
+  #muteBtn.pulse { animation:pulse .3s; }
+  @keyframes pulse { 50% { transform:scale(1.18); border-color:var(--ring); } }
+  [popover] { color:var(--ink); padding:12px 16px; margin:0; inset:auto; position:fixed; max-width:calc(100vw - 28px); box-sizing:border-box; }
+  [popover] h2 { margin:8px 0 4px; font-size:13px; font-weight:400; font-variant:small-caps; letter-spacing:.07em; color:var(--ink2); }
+  [popover] h2:first-child { margin-top:0; }
+  #help { right:14px; top:calc(22px + var(--tap)); width:300px; }
+  #help dl { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:0; }
+  #help dd { margin:0; }
+  @media (pointer:coarse) { .fine { display:none !important; } }
+  @media (pointer:fine) { .coarse { display:none !important; } }
+
+  /* the caption follows the hand: what it is doing, then what it says */
+  #caption, #tip { position:fixed; left:0; top:0; pointer-events:none; text-align:center; will-change:transform; }
+  #caption { max-width:min(280px, calc(100vw - 24px)); padding:5px 12px; font-size:15px; border-radius:10px; }
+  #capDo { display:block; font-style:italic; color:var(--ink2); }
+  #capSay { display:block; }
+  #capDo:empty, #capSay:empty { display:none; }
+  #tip { padding:2px 9px; font-size:13px; font-variant:small-caps; letter-spacing:.07em; white-space:nowrap; }
+
+  /* loading and failure: one card in the middle of the room */
+  #card { position:fixed; inset:0; display:grid; place-items:center; pointer-events:none; }
+  #card > div { padding:14px 22px; text-align:center; font-size:16px; font-style:italic; pointer-events:auto; max-width:calc(100vw - 48px); }
+  #card p { margin:0; }
+  #card button { margin-top:12px; font-style:normal; }
+
+  #dock { position:fixed; left:50%; bottom:max(10px, env(safe-area-inset-bottom)); transform:translateX(-50%); display:flex; flex-direction:column; gap:8px; align-items:center; width:min(900px, calc(100vw - 24px)); transition:opacity .4s; }
+  #dock[inert] { opacity:.4; }
+  #keys { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; max-width:100%; }
+  #keys button, #pal button, #card button, #brainBtn { background:#1a1310d9; border:1px solid var(--line); border-radius:3px; min-height:var(--tap); padding:6px 13px; font-variant:small-caps; letter-spacing:.07em; white-space:nowrap; }
+  #keys button:hover, #pal button:hover, #card button:hover, #brainBtn:hover { border-color:var(--brass); background:#2a1d14; }
+  #keys kbd { margin-left:7px; font-size:11px; font-variant:normal; letter-spacing:0; color:var(--ink2); }
+  #pal { left:50%; transform:translateX(-50%); width:min(560px, calc(100vw - 24px)); max-height:60vh; overflow-y:auto; }
+  #pal div { display:flex; flex-wrap:wrap; gap:8px; }
+  #talk { display:flex; width:min(360px, 100%); margin:0; background:var(--card); border:1px solid var(--edge); border-radius:3px; }
+  #talk:focus-within { outline:2px solid var(--ring); outline-offset:2px; }
+  #talkText { flex:1; min-width:0; height:calc(var(--tap) + 2px); padding:0 12px; background:none; border:0; outline:0; font-style:italic; -webkit-user-select:text; user-select:text; }
+  #talkText::placeholder { color:#9c8c70; opacity:1; }
+  #talk button { width:var(--tap); padding:0; background:none; border:0; border-left:1px solid var(--line); color:var(--ring); display:grid; place-items:center; touch-action:none; }
+  #talk button:hover, #micBtn.on { background:#2a1d14; }
+  #talk svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+  #talkHint { margin:-3px 0 0; font-size:13px; font-style:italic; color:var(--ink2); }
+  #brainRow { font-size:13px; color:var(--ink2); }
+  #brainBtn { min-height:0; padding:3px 10px; font-size:13px; }
+  #brainLoad progress { width:140px; height:6px; margin-left:8px; vertical-align:middle; accent-color:var(--brass); }
+
+  @media (pointer:coarse) { #talkText { font-size:16px; } #keys kbd { display:none; } }
+  @media (max-width:760px) {                 /* a phone: one row of cards that scrolls sideways */
+    #keys { flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; width:100%; scrollbar-width:none; scroll-snap-type:x proximity;
+      -webkit-mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+    #keys::-webkit-scrollbar { display:none; }
+    #keys button { scroll-snap-align:start; flex:none; }
+    #keys button:last-child { margin-right:24px; }
+    #talk { width:100%; }
+    #soundTip { display:none; }
+  }
+  @media (max-height:500px) {                 /* a phone on its side: cards and the box share one row */
+    #dock { flex-direction:row; width:calc(100vw - 24px); bottom:max(6px, env(safe-area-inset-bottom)); }
+    #keys { flex:1; min-width:0; flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; scrollbar-width:none; }
+    #keys button { flex:none; }
+    #talk { width:230px; flex:none; }
+    #talkHint, #brainRow, #title p { display:none; }
+  }
+  @media (prefers-reduced-motion:reduce) { * { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="vig"></div>
+<div id="grain"></div>
 <div id="hud"></div>
-<div id="help">click the floor: walk there · double-click: sprint<br>click the switch, bell, ball, rug or piano to use it<br>click the hand to poke it · rest the cursor and it looks<br>WASD: walk · Shift: scuttle · Q E: turn · Space: jump<br>1–0: wave yes no shrug laugh bow thumbs-up peace snap double-snap<br>hold V: talk · M: sound · ` debug</div>
-<div id="dock">
+<header id="title"><h1>Thing</h1><p>a hand that walks</p></header>
+<div id="top">
+  <span id="soundTip"><span class="fine">click</span><span class="coarse">tap</span> for sound</span>
+  <button id="muteBtn" aria-pressed="true" aria-label="Sound: starts with your first press">♪</button>
+  <button id="helpBtn" popovertarget="help" aria-label="How to play">?</button>
+</div>
+<div id="help" class="card" popover>
+  <dl class="fine">
+    <dt>Click the floor</dt><dd>walk there. Twice: sprint</dd>
+    <dt>Hold on the floor</dt><dd>it follows the pointer</dd>
+    <dt>Click the hand</dt><dd>poke it</dd>
+    <dt>Click a thing</dt><dd>use it</dd>
+    <dt><kbd>W A S D</kbd></dt><dd>walk. <kbd>Shift</kbd>: scuttle</dd>
+    <dt><kbd>Q E</kbd></dt><dd>turn</dd>
+    <dt><kbd>Space</kbd></dt><dd>jump</dd>
+    <dt><kbd>1</kbd> to <kbd>0</kbd></dt><dd>signs</dd>
+    <dt><kbd>/</kbd></dt><dd>type a command</dd>
+    <dt class="voice"><kbd>V</kbd>, held</dt><dd class="voice">speak a command</dd>
+    <dt><kbd>M</kbd></dt><dd>sound</dd>
+  </dl>
+  <dl class="coarse">
+    <dt>Tap the floor</dt><dd>walk there. Twice: sprint</dd>
+    <dt>Hold and drag</dt><dd>it follows your finger</dd>
+    <dt>Tap the hand</dt><dd>poke it</dd>
+    <dt>Tap a thing</dt><dd>use it</dd>
+  </dl>
+</div>
+<div id="caption" class="card" role="status" aria-live="polite" hidden><span id="capDo"></span><span id="capSay"></span></div>
+<div id="tip" class="card" hidden></div>
+<div id="card"><div class="card" role="alert"><p id="cardMsg">Waking the hand…</p><button id="cardBtn" hidden onclick="location.reload()">Try again</button></div></div>
+<div id="pal" class="card" popover>
+  <h2>Moves</h2>
+  <div>
+    <button data-say="come here">come here</button>
+    <button data-say="go to the door">to the door</button>
+    <button data-say="go to the step">to the step</button>
+    <button data-say="run to the corner">run to the corner</button>
+    <button data-say="turn around">turn around</button>
+    <button data-say="jump">jump</button>
+    <button data-say="take a nap">take a nap</button>
+    <button data-say="stop">stop</button>
+  </div>
+  <h2>Signs</h2>
+  <div>
+    <button data-say="nod">yes</button>
+    <button data-say="say no">no</button>
+    <button data-say="shrug">shrug</button>
+    <button data-say="laugh">laugh</button>
+    <button data-say="bow">bow</button>
+    <button data-say="thumbs up">thumbs up</button>
+    <button data-say="thumbs down">thumbs down</button>
+    <button data-say="peace">peace</button>
+    <button data-say="rock on">horns</button>
+    <button data-say="finger gun">finger gun</button>
+    <button data-say="point">point</button>
+    <button data-say="beckon">beckon</button>
+    <button data-say="snap">snap</button>
+  </div>
+  <h2>The room</h2>
+  <div>
+    <button data-say="ring the bell">ring the bell</button>
+    <button data-say="kick the ball">kick the ball</button>
+    <button data-say="flip the light switch">light switch</button>
+    <button data-say="play the piano">play the piano</button>
+    <button data-say="knock">knock on the glass</button>
+    <button data-say="say hi in morse">hi in Morse</button>
+  </div>
+</div>
+<div id="dock" inert>
   <div id="keys">
-    <button data-say="wave">wave</button>
+    <button data-say="wave">wave<kbd>1</kbd></button>
     <button data-say="dance">dance</button>
     <button data-say="play the piano">piano</button>
     <button data-say="knock">knock</button>
     <button data-say="morse sos">morse</button>
     <button data-say="high five">high five</button>
-    <button data-say="double snap">lights</button>
+    <button data-say="double snap">lights<kbd>0</kbd></button>
     <button data-say="play dead">play dead</button>
-    <button id="muteBtn" aria-pressed="false">sound on</button>
+    <button id="moreBtn" popovertarget="pal">more…</button>
   </div>
-  <div id="talk">
-    <span id="talkState">hold V to talk</span>
-    <input id="talkText" placeholder="…or type: say hi in morse" autocomplete="off" aria-label="Type a command for the hand" />
-    <button id="brainBtn" hidden>load brain (340 MB)</button>
+  <form id="talk">
+    <input id="talkText" placeholder="tell it what to do…" autocomplete="off" autocapitalize="off" enterkeyhint="send" aria-label="Tell the hand what to do" />
+    <button type="button" id="micBtn" hidden aria-label="Hold to speak a command"><svg viewBox="0 0 16 16"><rect x="6" y="1.5" width="4" height="8" rx="2"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5"/></svg></button>
+    <button id="sendBtn" class="coarse" aria-label="Send"><svg viewBox="0 0 16 16"><path d="M2.5 8h11M9 3.5 13.5 8 9 12.5"/></svg></button>
+  </form>
+  <p id="talkHint" class="fine" hidden>or hold <kbd>V</kbd> and speak</p>
+  <div id="brainRow" hidden>
+    <button id="brainBtn">Smarter replies: download a 340 MB model</button>
+    <label id="brainLoad" hidden>Downloading the brain<span id="brainPct"></span><progress id="brainBar" max="100"></progress></label>
   </div>
 </div>
 <script>
   // early error capture (before module loads) for diagnostics
   window.__errs = [];
-  addEventListener('error', e => window.__errs.push('err: ' + (e.error && e.error.stack || e.message)));
-  addEventListener('unhandledrejection', e => window.__errs.push('rej: ' + (e.reason && (e.reason.stack||e.reason.message) || e.reason)));
+  // the page cannot start: say so on the card, in words a visitor can act on
+  window.__fatal = (msg) => {
+    document.getElementById('cardMsg').textContent = msg;
+    document.getElementById('cardBtn').hidden = false;
+    document.getElementById('card').hidden = false;
+    document.getElementById('dock').hidden = true;
+  };
+  const early = (m) => { window.__errs.push(m); if (!(window.__hand && window.__hand.state.ready)) window.__fatal('The hand did not load.'); };
+  addEventListener('error', e => early('err: ' + (e.error && e.error.stack || e.message)));
+  addEventListener('unhandledrejection', e => early('rej: ' + (e.reason && (e.reason.stack||e.reason.message) || e.reason)));
   ['log','error','warn'].forEach(k => { const o=console[k]; console[k]=(...a)=>{ window.__errs.push(k+': '+a.map(x=>{try{return typeof x==='object'?JSON.stringify(x):String(x)}catch{return 'obj'}}).join(' ')); o.apply(console,a);}; });
 </script>
 <script type="importmap">
@@ -73,7 +222,7 @@
   }
 }
 </script>
-<script type="module" src="./main.js"></script>
+<script type="module" src="./main.js" onerror="__fatal('The page did not load. Check the connection.')"></script>
 
 </body>
 </html>
