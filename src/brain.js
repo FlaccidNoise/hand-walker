@@ -236,6 +236,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
     plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
+    if (sim.s.gesture && sim.s.gesture.name === 'sleep') plan = [{ do: 'gesture', name: 'rouse' }, ...plan];   // woken: it stretches first
     if (plan.length === 1 && plan[0].do === 'rps' && rpsPick(plan[0].pick)) return true;   // a pick for the round in play
     plan = plan.map(a => a.do === 'rps' ? rpsDraw(a) : a);
     // out of sight in its box: whatever it is asked, it comes out first. Asked only to go
@@ -407,7 +408,7 @@ export function makeBrain(sim, rig, camera, props = null) {
 
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
-- {"do":"gesture","name":"..."} — yes (nod), no (sits up and wags a finger), shake (a quick cross shake of the whole body), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), peek (stand tall and look about), startle (a flinch), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive (a slap on the glass), snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
+- {"do":"gesture","name":"..."} — yes (nod), no (sits up and wags a finger), shake (a quick cross shake of the whole body), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), peek (stand tall and look about), startle (a flinch), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (lie down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive (a slap on the glass), snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
 - {"do":"walkTo","x":X,"z":Z,"speed":S} — walk to a WORLD position in your room (preferred for going places). "speed" (u/s): ~0.8 relaxed default, ~1.6 jog, ~3-3.4 FULL SPRINT — sprint when told to hurry/run/race or when excited.
 - {"do":"walk","forward":F,"right":R,"speed":S} — walk a relative offset in YOUR body frame (for "back up a bit", "come closer"); negative allowed. You end up facing your travel direction.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"

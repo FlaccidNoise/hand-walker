@@ -1,5 +1,7 @@
 // src/gestures.js — gesture pose-track definitions + sampler (buddy vocabulary).
-// A gesture: { dur, hover?: true, body?: {pitch,roll,height,lift: Track},
+// A gesture: { dur, hover?: true, hold?: [u0, u1] (a long hover's held span: an input
+//   skips it to u1, where the getting-up starts), unfurl?: s (the fist opens over this,
+//   not HOVER_UNFURL of dur), body?: {pitch,roll,height,lift: Track},
 //   splay?: {fingers,track},
 //   digits?: { finger: { base:{yaw,mcp,pip} | 'rest', yaw?/mcp?/pip?: Track, win?:[u0,u1] } } }.
 // base 'rest' = the digit's own stance angles (tip on its rest spot at offset 0).
@@ -189,9 +191,23 @@ const STRETCH = {
 //   It lies 0.95 u to one side of the wrist and 0.23 to the other, 1.51 ahead (measured)
 // - the thumb folds under the fist: left out, it stuck 1.19 u out to the side
 const LIE_LIFT = -0.92, LIE_ROLL = -1.7, LIE = { yaw: 0, mcp: 0.7, pip: 1.0 };
-const late = (v) => [[0, -v], [0.2, -v], [0.32, 0], [1, 0]];
-const lieDigits = (win) => Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
-  [f, { base: f === 'thumb' ? FIST_THUMB : LIE, win, mcp: late(f === 'thumb' ? 1.3 : 0.7), pip: late(0.5) }]));
+// lie down for T s in all: 0.8 s going down, held, 1.44 s getting up whatever T is (keys
+// are laid out for T = 3.6 and the held span stretched: k). It breathes while it lies.
+// An input skips the held span (`hold`), and the fist opens over a fixed 0.54 s (`unfurl`)
+const lie = (T) => {
+  const k = (u) => u < 0.4 ? u * 3.6 / T : 1 - (1 - u) * 3.6 / T, w1 = k(0.74);
+  const late = (v) => [[0, -v], [k(0.148) / w1, -v], [k(0.237) / w1, 0], [1, 0]];
+  const breath = [];
+  for (let t = 2.3; t < T - 2.4; t += 3) breath.push([t / T, LIE_LIFT + 0.03], [(t + 1.5) / T, LIE_LIFT]);
+  return {
+    dur: T, hover: true, hold: [k(0.22) + 0.3 / T, k(0.6)], unfurl: 0.54,
+    body: { lift: [[0, 0], [k(0.06), 0.2], [k(0.22), LIE_LIFT], ...breath, [k(0.6), LIE_LIFT], [k(0.68), 0.45], [k(0.9), 0.45], [1, 0]],
+      pitch: [[0, 0], [k(0.18), 0.6], [k(0.64), 0.6], [k(0.74), 0], [1, 0]],
+      roll: [[0, 0], [k(0.04), 0], [k(0.2), LIE_ROLL], [k(0.64), LIE_ROLL], [k(0.74), 0], [1, 0]] },
+    digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
+      [f, { base: f === 'thumb' ? FIST_THUMB : LIE, win: [0, w1], mcp: late(f === 'thumb' ? 1.3 : 0.7), pip: late(0.5) }])),
+  };
+};
 
 export const GESTURES = {
   // nod: a small wind-up, two dips of the stump, a hard stop. The body sinks with the pitch
@@ -343,7 +359,7 @@ export const GESTURES = {
   // twitch. Then it gets up as if nothing happened. `pitch` cancels the walking
   // posture so the hand lies level (pitch stays far from its ±90° gimbal lock).
   playDead: {
-    dur: 6, hover: true,
+    dur: 6, hover: true, hold: [0.28, 0.5],    // a click on a dead hand: it gets up now, not in 4 s
     body: {
       lift:  [[0, 0], [0.07, 0.5], [0.22, 0.5], [0.28, DEAD_LIFT], [0.5, DEAD_LIFT], [0.57, 0.5], [0.85, 0.5], [1, 0]],
       // it reels once at the top of the lift, then goes over. (A reel during the lift put the
@@ -366,12 +382,7 @@ export const GESTURES = {
   stretch: STRETCH,
   // into the box: lie down on its side (seated by u 0.22, up from 0.6). The brain shuts the
   // box at 1.1 s and hides the hand at 1.8 s, so the getting-up is never seen
-  nestle: {
-    dur: 3.6, hover: true,
-    body: { lift: [[0, 0], [0.06, 0.2], [0.22, LIE_LIFT], [0.6, LIE_LIFT], [0.68, 0.45], [0.9, 0.45], [1, 0]],
-      pitch: [[0, 0], [0.18, 0.6], [0.64, 0.6], [0.74, 0], [1, 0]], roll: [[0, 0], [0.04, 0], [0.2, LIE_ROLL], [0.64, LIE_ROLL], [0.74, 0], [1, 0]] },
-    digits: lieDigits([0, 0.74]),
-  },
+  nestle: { ...lie(3.6), hold: undefined },    // (the box shuts on it: nothing to wake)
   // out of the box: sit up on the stump with the fingers curled (they show under the lid
   // as it lifts a crack, at 1.2 s), then the lid goes back (2.0 s) and the fingers open.
   // The front of the box drops at 2.8 s, before the fingers come down onto it
@@ -392,23 +403,11 @@ export const GESTURES = {
   crouch: { dur: 0.4, body: { height: [[0, 0], [0.35, -0.17], [0.8, -0.17], [1, 0]], pitch: [[0, 0], [0.35, 0.12], [0.8, 0.12], [1, 0]] } },
   land: { dur: 0.45, body: { height: [[0, 0], [0.2, -0.2], [0.55, 0.04], [1, 0]], pitch: [[0, 0], [0.2, 0.12], [0.6, -0.03], [1, 0]] } },
   morse: morseGesture('sos'),                // the brain's morse action swaps in the asked text
-  // nap: settle low with the stump laid down level, lean over, and breathe slowly for the
-  // whole hold — user-invokable ("take a nap") and the payoff of the 'nap' idle
-  // behavior. Long dur is fine: any input cancels via the normal gesture path.
-  sleep: {
-    dur: 16,
-    body: {
-      height: (() => {
-        const keys = [[0, 0], [0.05, -0.18]];
-        for (let k = 0; k <= 16; k++)
-          keys.push([0.06 + 0.86 * k / 16, -0.18 + 0.02 * Math.sin(2 * Math.PI * 4 * k / 16)]);
-        keys.push([1, 0]);
-        return keys;
-      })(),
-      pitch: [[0, 0], [0.06, 0.25], [0.94, 0.25], [1, 0]],
-      roll:  [[0, 0], [0.06, 0.1], [0.94, 0.1], [1, 0]],
-    },
-  },
+  // nap: lie down on its side and breathe. "Take a nap", the rug, and the nap idles. Any
+  // input wakes it (`hold`): it is up in 1.5 s. (It was a held bow that read as a crouch)
+  sleep: lie(16),
+  // woken: a short stretch before it does what it was asked
+  rouse: { ...STRETCH, dur: 1.5 },
 };
 
 // idles: subtle low-amplitude fidgets, weighted-random after IDLE_AFTER s without
