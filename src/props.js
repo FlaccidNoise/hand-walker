@@ -293,7 +293,8 @@ export function makeProps({ scene, lights }) {
       plan: () => [{ do: 'jump' }] },                         // what it makes of the result is a reaction (onEvent)
     bell: { label: 'bell', mesh: bellG, anchor: { x: -3.2, z: 3.2 }, plan: () => [{ do: 'jump' }] },
     ball: { label: 'ball', mesh: ballM, get anchor() { return { x: ball.x, z: ball.z }; }, speed: C.SPEED.scuttle, plan: () => [] },
-    rug: { label: 'rug', mesh: rug, anchor: { x: -3.5, z: -3.5 }, plan: () => [{ do: 'gesture', name: 'sleep' }] },
+    // (it lies 1.5 u ahead of its wrist: it stands at the rug's edge and lies along the screen)
+    rug: { label: 'rug', mesh: rug, anchor: { x: -3.9, z: -3.06 }, facing: Math.PI / 4, plan: () => [{ do: 'gesture', name: 'sleep' }] },
     // walk the length of the keys and back: the gait is the tune
     piano: { label: 'floor piano', mesh: pianoG,
       get anchor() { return { x: xMid, z: handZ < (zLo + zHi) / 2 ? zLo : zHi }; },

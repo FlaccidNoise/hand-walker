@@ -211,7 +211,13 @@ function makeSim(rig, calib) {
   // step(). Re-plants via applyBodyPose+reseedFeet on end, mirroring jump's landing.
   const hovering = () => !!(s.gesture && s.gesture.def.hover);
   const cancelIdle = () => { if (s.gesture && s.gesture.idle) dropGesture(); };
-  const markInput = () => { cancelIdle(); s.lastInput = s.time; };
+  // an input wakes a long hover (def.hold = [u0, u1], the span its pose is held): it skips
+  // to u1, where the getting-up starts. Before u0 it is still going down: it skips on arrival
+  const wakeHover = () => {
+    const g = s.gesture, hold = g.def.hold;
+    if (hold && g.t < hold[1] * g.dur) { if (g.t >= hold[0] * g.dur) g.t = hold[1] * g.dur; else g.wake = true; }
+  };
+  const markInput = () => { cancelIdle(); if (hovering()) wakeHover(); s.lastInput = s.time; };
   function gesture(name) {
     const def = GESTURES[name];
     markInput();
@@ -412,7 +418,13 @@ function makeSim(rig, calib) {
     // rest of the swing, so the unfold never races the rate cap into touchdown
     const fold = sw.rescue && t < C.RESCUE_HOLD ? 1
       : t < fEnd ? Math.sin(Math.PI * t / fEnd) : 0;
-    solveLegWorld(f, target, C.RATE_SWING, dt, fold, null, true);
+    // the elbow branch the digit left the floor with, kept for the swing. Re-selected
+    // freely, a pinky lifting from behind its knuckle (braking from a sprint) changed
+    // branch on its first step: the rate-capped joints crossed to the other solution
+    // over four steps with the tip dragged backward on the floor, and the ground
+    // constraint then threw it 0.82 u in one. (The thumb still re-selects: pinned, its
+    // re-plant after a carry landed at 0.048 u a step and its steps shortened 10%)
+    solveLegWorld(f, target, C.RATE_SWING, dt, fold, d.isThumb ? null : leg.branch ?? null, true);
     if (t >= 1) {                                            // pin stance at the ACHIEVED tip
       d.tip.getWorldPosition(leg.foot);
       // a footfall twitches the body: a nod, and a lean toward the side that landed
@@ -561,6 +573,7 @@ function makeSim(rig, calib) {
         s.gesture.t += dt;
         const u1 = s.gesture.t / s.gesture.dur;
         for (const [u, name] of s.gesture.def.cue ?? []) if (u0 < u && u1 >= u && sim.onCue) sim.onCue(name);
+        if (s.gesture.wake) wakeHover();
         if (s.gesture.t >= s.gesture.dur) s.gesture = null;
       }
       // hover end: digits re-plant through real swings (the gesture-exit path in the
@@ -716,7 +729,7 @@ function makeSim(rig, calib) {
           to: restLanding(f), t: 0, dur: C.REPLANT_DUR, rescue: false, replant: true };
         if (hovering()) {                                     // digits' window closed mid-hover: gear down
           leg.swing.a0 = { ...leg.angles };
-          leg.swing.dur = C.HOVER_UNFURL * s.gesture.dur;
+          leg.swing.dur = s.gesture.def.unfurl ?? C.HOVER_UNFURL * s.gesture.dur;   // (`unfurl`: s, for a hover whose length varies)
         }
         leg.mode = 'swing'; leg.cycleId = -1;
       }

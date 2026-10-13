@@ -51,3 +51,14 @@ test('every stance body track starts and ends at zero (no pop in, no pop out)', 
     for (const [k, track] of Object.entries(def.body ?? {}))
       assert.ok(Math.abs(sampleTrack(track, 0)) < 1e-9 && Math.abs(sampleTrack(track, 1)) < 1e-9, `${name} ${k}`);
 });
+
+test('a hover that an input can wake holds its body pose across the span it skips', () => {
+  for (const [name, def] of ALL.filter(([, d]) => d.hold)) {
+    const [u0, u1] = def.hold;
+    assert.ok(def.hover && u0 < u1 && u1 < Math.min(...Object.values(def.digits).map(d => d.win[1])), `${name} hold ${def.hold}`);
+    for (const k of ['roll', 'pitch']) scan(def.body[k], (v, u) => { if (u >= u0 && u <= u1)
+      assert.ok(Math.abs(v - sampleTrack(def.body[k], u1)) < 1e-9, `${name} ${k} moves inside its hold at u=${u.toFixed(3)}`); });
+    scan(def.body.lift, (v, u) => { if (u >= u0 && u <= u1)
+      assert.ok(Math.abs(v - sampleTrack(def.body.lift, u1)) <= 0.03 + 1e-9, `${name} lift is ${v.toFixed(2)} inside its hold (a breath is 0.03)`); });
+  }
+});

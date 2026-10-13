@@ -403,3 +403,10 @@ test('rock, paper, scissors: a pick is taken until the throw, the result is a re
   assert.equal(m.brain.rps.result, null, 'no pick: it just throws');
   assert.equal(m.brain.rpsPick('lizard'), false);
 });
+
+test('woken from a nap, it stretches before it does what it was asked', () => {
+  const m = mock();
+  m.sim.s.gesture = { name: 'sleep', t: 3, dur: 16 };
+  m.brain.command([{ do: 'gesture', name: 'yes' }], { source: 'key' });
+  assert.deepEqual(m.brain.st.plan.map(a => a.name), ['rouse', 'yes']);
+});
