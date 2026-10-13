@@ -16,7 +16,7 @@ const DEV = new URLSearchParams(location.search).has('dev');
 // so the room fills it (its side corners are cropped). Both stand at azimuth 39.6°, so
 // the brain's screen directions hold at every shape.
 const CAM_WIDE = { fov: 36, eye: [9.95, 6.31, 11.99], target: [0, 0.3, 0.3] };    // aspect ≥ 1.6
-const CAM_TALL = { fov: 50, eye: [12.23, 16.09, 14.84], target: [0.9, 0, 1.0] };  // aspect ≤ 0.46
+const CAM_TALL = { fov: 50, eye: [12.96, 17.06, 15.73], target: [0.9, 0, 1.0] };  // aspect ≤ 0.46. The switch and the bell keep a thumb's width from the screen edge
 const FOLLOW = 0.3, FOLLOW_TALL = 0.35;    // share of the hand's position the view's target takes (wide, + upright phone)
 const CLOSE_K = 0.72, CLOSE_HOLD = 0.9;    // dolly while a gesture plays · s it stays in after one ends
 const ZOOM_MIN = 0.5;                      // nearest wheel dolly, as a share of the home distance
