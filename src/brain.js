@@ -49,7 +49,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (st.onstatus) st.onstatus(st);
   };
   const say = (text, kind = 'say') => { if (st.onsay) st.onsay(text, kind); else if (kind === 'error') console.warn('[brain]', text); };
-  const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); say(msg, 'error'); };
+  const fail = (msg) => { orphan(); sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); say(msg, 'error'); };
   // marks: things a plan makes happen in the room as it goes. An action may carry `fire`
   // (at its start), a gesture `at: [[s, mark], ...]` (as it plays). 'hide' and 'show' are the
   // hand going out of sight in its box: render visibility only, the sim never knows
@@ -59,11 +59,21 @@ export function makeBrain(sim, rig, camera, props = null) {
   // the box ends outside it, a hand's width clear (0.7 to the side, 0.5 off the front).
   // The box stands in the +x, -z corner
   const clearOfBox = (p, a) => {
-    const k = box && a.for !== 'box' && box.solid;
+    const k = box && a.for !== 'box' && !a.box && box.solid;
     if (!k || p.x <= k.x0 - 0.7 || p.z >= k.z1 + 0.5) return p;
     return p.x - (k.x0 - 0.7) < k.z1 + 0.5 - p.z ? { x: k.x0 - 0.7, z: p.z } : { x: p.x, z: k.z1 + 0.5 };
   };
-  const atHome = () => body.visible === false && Math.hypot(body.position.x - box.anchor.x, body.position.z - box.anchor.z) < 4;
+  // A plan can be replaced or stopped at any moment, and a hover cannot be cut: the hand
+  // goes on lying down, or sitting up, with nobody to shut the box on it or open it. So
+  // the marks of a gesture that outlives its plan are kept (`trail`) and fire on time.
+  // The box then always ends shut on a hidden hand or open round a visible one.
+  let trail = null;
+  const live = () => { const a = st.i >= 0 && st.plan[st.i]; return a && a.at && a.started ? a : trail; };
+  const orphan = () => { const a = live(); if (a && sim.s.gesture && (a.k ?? 0) < a.at.length) trail = { name: a.name, at: a.at, k: a.k ?? 0 }; };
+  const pending = (m) => { const a = live(); return !!a && a.at.slice(a.k ?? 0).some(x => x[1] === m); };
+  // home: out of sight in the box, or about to be (lying down in it), and not on the way out
+  const inside = () => { const k = box && box.solid, p = body.position; return !!k && p.x > k.x0 && p.x < k.x1 && p.z > k.z0 && p.z < k.z1; };
+  const atHome = () => !!box && (pending('hide') || (body.visible === false && !pending('show') && inside()));
   const settle = () => { if (st.i < 0 && st.status !== 'idle') setStatus('idle'); };   // no plan came of it: do not stay 'thinking'
 
   const ACTIONS = {
@@ -192,9 +202,10 @@ export function makeBrain(sim, rig, camera, props = null) {
     // offended: one rude sign, then off to the far corner to sulk with its back turned
     sulk: () => [{ do: 'gesture', name: 'flipBird' }, { do: 'walkTo', x: -4, z: -4, speed: C.SPEED.scuttle },
       { do: 'face', heading: Math.PI * 0.75 }, { do: 'wait', s: 2 }],
-    // its box: in, and out (asked to come out when it is out, it shrugs)
+    // its box: in, and out (asked to come out when it is out, it shrugs; caught standing in
+    // it, it walks out)
     home: () => [{ do: 'use', target: 'box' }],
-    out: () => atHome() ? box.out() : [{ do: 'gesture', name: 'idk' }],
+    out: () => atHome() ? box.out() : inside() ? box.leave() : [{ do: 'gesture', name: 'idk' }],
   };
   // rock, paper, scissors. {do:'rps', pick?} becomes one gesture (rpsRock, rpsPaper or
   // rpsScissors) with `game` set: the hand's sign is drawn before the count-in (it cannot
@@ -239,12 +250,19 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (sim.s.gesture && sim.s.gesture.name === 'sleep') plan = [{ do: 'gesture', name: 'rouse' }, ...plan];   // woken: it stretches first
     if (plan.length === 1 && plan[0].do === 'rps' && rpsPick(plan[0].pick)) return true;   // a pick for the round in play
     plan = plan.map(a => a.do === 'rps' ? rpsDraw(a) : a);
-    // out of sight in its box: whatever it is asked, it comes out first. Asked only to go
-    // home, it stays. (Hidden and nowhere near the box: the sim was reset under it. Show it.)
-    if (body.visible === false && box) {
-      if (!atHome()) body.visible = true;
-      else if (plan.every(a => a.do === 'routine' && a.name === 'home')) return true;
-      else plan = [{ do: 'routine', name: 'out' }, ...plan.filter(a => !boxy(a))];
+    // home (or lying down to be): whatever it is asked, it finishes going in and comes out
+    // first. Asked only to go home, it stays. On its way out already: "come out" adds nothing.
+    // (Hidden and not in the box: the sim was reset under it. Show it.)
+    if (box) {
+      if (body.visible === false && !inside()) body.visible = true;
+      const only = (name) => plan.every(a => a.do === 'routine' && a.name === name);
+      if (atHome()) {
+        if (only('home')) return true;
+        plan = [{ do: 'routine', name: 'out' }, ...plan.filter(a => !boxy(a))];
+      } else if (pending('show') || pending('boxOpen')) {
+        if (only('out')) return true;
+        plan = plan.filter(a => !(a.do === 'routine' && a.name === 'out'));
+      }
     }
     let noRoutine = null;
     plan = plan.flatMap(a => a.do !== 'routine' ? [a] : ROUTINES[a.name] ? ROUTINES[a.name]() : (noRoutine = a.name, []));
@@ -261,11 +279,14 @@ export function makeBrain(sim, rig, camera, props = null) {
       return [...go, ...p.plan()].map(b => ({ ...b, for: a.target }));   // `for`: the page names the errand
     });
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
+    // standing in its box (or about to sit up in it) and sent elsewhere: out by the front first
+    if (box && !atHome() && inside() && !plan[0].box && plan[0].for !== 'box') plan = [box.leave()[0], ...plan];
     plan = facing(plan);
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
     // a walk the new plan does not continue must stop: the next action waits for a
     // standing hand, and nothing else would zero the sim's walk command
     if (st.i >= 0 && !/^walk/.test(plan[0].do)) sim.autoWalk(0, 0);
+    orphan();
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
     st.i = 0;
     st.tag = tag;                                        // idle behaviors show 'idling', not 'acting'
@@ -273,7 +294,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     return true;
   }
   function stop() {
-    if (st.i >= 0 || st.status !== 'idle') { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); }
+    if (st.i >= 0 || st.status !== 'idle') { orphan(); sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); }
   }
 
   // ---- ONE command layer: keys, clicks, voice and idle behaviors all enter here.
@@ -388,6 +409,11 @@ export function makeBrain(sim, rig, camera, props = null) {
     // that comes back replaces it (a gesture cut short eases out)
     if (asking && st.i < 0 && bClock >= thinkAt && !sim.s.gesture && !sim.s.airborne
         && sim.s.speed <= C.V_MOVE && sim.gesture('thinking')) thinkAt = bClock + GESTURES.thinking.dur + THINK_GAP;
+    if (trail) {                                         // marks of a gesture whose plan is gone
+      const g = sim.s.gesture, on = g && g.name === trail.name;
+      while (trail.k < trail.at.length && (!on || g.t >= trail.at[trail.k][0])) mark(trail.at[trail.k++][1]);
+      if (trail.k >= trail.at.length) trail = null;
+    }
     if (st.i < 0) return;
     planAt = bClock;
     const a = st.plan[st.i];
