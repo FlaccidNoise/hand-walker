@@ -6,7 +6,7 @@ import * as C from '../src/tuning.js';
 
 test('steps map onto plan actions', () => {
   const p = stepsToPlan([{ do: 'go', to: 'door' }, { do: 'gesture', name: 'wave' }, { do: 'turn', dir: 'around' }, { do: 'jump' }]);
-  assert.deepEqual(p, [{ do: 'walkTo', x: 0, z: -4.2, speed: C.SPEED.strut }, { do: 'gesture', name: 'wave' },
+  assert.deepEqual(p, [{ do: 'walkTo', x: 0, z: -C.ROOM.half, speed: C.SPEED.strut }, { do: 'gesture', name: 'wave' },
     { do: 'turn', deg: 180 }, { do: 'jump' }]);
 });
 

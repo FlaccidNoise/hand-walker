@@ -44,7 +44,7 @@ export function stepsToPlan(steps, pos = { x: 0, z: 0 }) {
   for (const s of Array.isArray(steps) ? steps.slice(0, 12) : []) {
     if (!s || typeof s !== 'object') continue;
     const speed = s.fast ? C.SPEED.sprint : C.SPEED.strut;
-    if (s.do === 'go' && PLACES[s.to]) { [x, z] = PLACES[s.to]; plan.push({ do: 'walkTo', x, z, speed }); }
+    if (s.do === 'go' && PLACES[s.to]) { [x, z] = PLACES[s.to].map(clamp); plan.push({ do: 'walkTo', x, z, speed }); }
     else if (s.do === 'move' && DIRS[s.dir]) {
       x = clamp(x + DIRS[s.dir][0] * 2.5); z = clamp(z + DIRS[s.dir][1] * 2.5);
       plan.push({ do: 'walkTo', x, z, speed });

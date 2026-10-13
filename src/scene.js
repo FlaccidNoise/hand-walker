@@ -17,6 +17,9 @@ const DEV = new URLSearchParams(location.search).has('dev');
 // the brain's screen directions hold at every shape.
 const CAM_WIDE = { fov: 36, eye: [9.95, 6.31, 11.99], target: [0, 0.3, 0.3] };    // aspect ≥ 1.6
 const CAM_TALL = { fov: 50, eye: [12.23, 16.09, 14.84], target: [0.9, 0, 1.0] };  // aspect ≤ 0.46
+const FOLLOW = 0.3, FOLLOW_TALL = 0.35;    // share of the hand's position the view's target takes (wide, + upright phone)
+const CLOSE_K = 0.72, CLOSE_HOLD = 0.9;    // dolly while a gesture plays · s it stays in after one ends
+const ZOOM_MIN = 0.5;                      // nearest wheel dolly, as a share of the home distance
 
 const std = (color, roughness, o) => new THREE.MeshStandardMaterial({ color, roughness, ...o });
 
@@ -82,7 +85,7 @@ export function buildScene(container) {
     const p = THREE.MathUtils.clamp((1.6 - camera.aspect) / 1.14, 0, 1);
     view.eye.fromArray(CAM_WIDE.eye).lerp(_v.fromArray(CAM_TALL.eye), p);
     view.target.fromArray(CAM_WIDE.target).lerp(_v.fromArray(CAM_TALL.target), p);
-    view.fov = THREE.MathUtils.lerp(CAM_WIDE.fov, CAM_TALL.fov, p);
+    view.fov = THREE.MathUtils.lerp(CAM_WIDE.fov, CAM_TALL.fov, p); view.tall = p;
     camHome.copy(view.target).add(view.eye);
     const d = view.eye.length();
     scene.fog.near = d + 6; scene.fog.far = d + 32;          // the fog keeps its place behind the room
@@ -92,6 +95,37 @@ export function buildScene(container) {
   };
   frame();
   controls.update();
+
+  // follow and push-in. The view only TRANSLATES (its target slides toward the hand)
+  // and DOLLIES along its own line of sight: azimuth and elevation never change, so the
+  // brain's screen directions hold. `close` = a gesture is playing: lean in on the hand.
+  // The wheel dollies too. view.hold = a tool has placed the camera itself (snap, film).
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const off = new THREE.Vector3(), want = new THREE.Vector3();
+  let dolly = 1, closeT = 0;
+  view.zoom = 1; view.shake = 0; view.hold = false;
+  renderer.domElement.addEventListener('wheel', (e) => {
+    if (controls.enabled) return;                            // the debug orbit owns the wheel
+    e.preventDefault();
+    view.zoom = THREE.MathUtils.clamp(view.zoom * Math.exp(e.deltaY * 0.0012), ZOOM_MIN, 1);
+  }, { passive: false });
+  const aim = (dt, hand, close, time) => {
+    if (controls.enabled || view.hold) return;
+    closeT = close ? CLOSE_HOLD : Math.max(0, closeT - dt);  // stay in through a run of gestures
+    const calm = still.matches;
+    const k = view.zoom * (closeT > 0 && !calm ? CLOSE_K : 1);
+    const u = THREE.MathUtils.clamp((1 - k) / (1 - ZOOM_MIN), 0, 1);     // 0 = the whole room, 1 = on the hand
+    // the nearer the lens, the more of the hand's position the target takes
+    const w = calm && u === 0 ? 0 : THREE.MathUtils.lerp(FOLLOW + FOLLOW_TALL * view.tall, 0.92, u);
+    want.set(hand.x * w, 0.45 * u, hand.z * w);
+    const a = 1 - Math.exp(-dt / (k < dolly ? 0.4 : 0.7));   // in quicker than out
+    off.lerp(want, 1 - Math.exp(-dt / 0.5)); dolly += (k - dolly) * a;
+    view.shake = calm ? 0 : Math.max(0, view.shake - dt / 0.22);         // a knock rattles the glass
+    camera.position.copy(view.target).add(off).addScaledVector(view.eye, dolly);
+    camera.position.x += 0.05 * view.shake * Math.sin(time * 95);
+    camera.position.y += 0.04 * view.shake * Math.sin(time * 71);
+    camera.lookAt(want.copy(view.target).add(off));
+  };
   const onResize = () => {
     const w = container.clientWidth, h = container.clientHeight;
     camera.aspect = w / h;
@@ -100,7 +134,7 @@ export function buildScene(container) {
   };
   window.addEventListener('resize', onResize);
 
-  return { renderer, scene, camera, camHome, view, controls, ground, pmrem, lights: { hemi, key, amb, rim }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
+  return { renderer, scene, camera, camHome, view, aim, controls, ground, pmrem, lights: { hemi, key, amb, rim }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
 }
 
 // ground: low-poly terrain mesh built by sampling terrain.js's vertexH on the SAME

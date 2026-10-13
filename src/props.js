@@ -42,7 +42,7 @@ export function switchFlips(sw, hand) {
 }
 
 // floor piano: a strip of keys laid along z. Which key is under a point, or -1.
-export const PIANO = { x0: -4.7, x1: -3.5, z0: -1.6, keyW: 0.4,
+export const PIANO = { x0: -4.5, x1: -3.3, z0: -1.6, keyW: 0.4,
   notes: [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25] };   // C major pentatonic: any run is a tune
 export function pianoKey(p, x, z) {
   if (x < p.x0 || x > p.x1) return -1;
@@ -213,7 +213,7 @@ export function makeProps({ scene, lights }) {
   const axis = new THREE.Vector3();
   // `plan`: what the hand does once it stands at `anchor` facing `facing` (world heading, rad)
   const P = {
-    switch: { label: 'light switch', mesh: plate, anchor: { x: 2.4, z: -4.55 }, facing: Math.PI / 2,
+    switch: { label: 'light switch', mesh: plate, anchor: { x: 2.4, z: -C.ROOM.half }, facing: Math.PI / 2,
       plan: () => [{ do: 'jump' }, { do: 'wait', s: 0.5 }, { do: 'gesture', name: state.lights ? 'thumbsUp' : 'thinking' }] },
     bell: { label: 'bell', mesh: bellG, anchor: { x: -3.2, z: 3.2 }, plan: () => [{ do: 'jump' }] },
     ball: { label: 'ball', mesh: ballM, get anchor() { return { x: ball.x, z: ball.z }; }, speed: C.SPEED.scuttle, plan: () => [] },

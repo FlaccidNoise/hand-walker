@@ -27,7 +27,7 @@ const state = {
 };
 
 async function init() {
-  const { renderer, scene, camera, camHome, controls, lights } = buildScene(app);
+  const { renderer, scene, camera, view, aim, controls, lights } = buildScene(app);
   const dbg = new DebugDraw(scene);
   dbg.visible = false;
 
@@ -53,11 +53,10 @@ async function init() {
   const props = makeProps({ scene, lights });
   const brain = makeBrain(sim, rig, camera, props);
   // gesture cues: sounds, and the double snap that works any `remote` prop from afar
-  let shake = 0;                                             // camera shake, 1 → 0 (a knock on the glass)
   sim.onCue = (name) => {
     if (name === 'remote') props.fire('switch');
     else if (SOUNDS[name]) SOUNDS[name]();
-    if (name === 'knock') shake = 1;
+    if (name === 'knock') view.shake = 1;                    // a knock on the glass rattles the view
   };
   sim.onStep = (f, foot) => props.footfall(f, foot.x, foot.z, sim.s.speed);
   // sound starts with the first key or pointer press (browsers refuse it before that)
@@ -69,7 +68,7 @@ async function init() {
   muteBtn.addEventListener('click', () => setMute(!audio.muted));
 
   const __hand = {
-    rig, scene, camera, controls, dbg, C, THREE, GESTURES, IDLES, props,
+    rig, scene, camera, view, controls, dbg, C, THREE, GESTURES, IDLES, props,
     solveLeg, resetToBind, tipLocal, groundY, state, calib, sim, brain,
     reset: (...a) => { brain.stop(); sim.reset(...a); },
     autoWalk: (x, z) => sim.autoWalk(x, z),
@@ -171,11 +170,8 @@ async function init() {
       else if (acc < 0) acc = 0;
     }
     input.update(dt);
-    if (controls.enabled) controls.update();                 // fixed diorama camera; orbit is debug-only
-    else if (shake > 0) {                                    // a knock rattles the view for a moment
-      shake = Math.max(0, shake - dt / 0.22);
-      camera.position.set(camHome.x + 0.05 * shake * Math.sin(clock.elapsedTime * 95), camHome.y + 0.04 * shake * Math.sin(clock.elapsedTime * 71), camHome.z);
-    }
+    if (controls.enabled) controls.update();                 // orbit is debug-only
+    else aim(dt, rig.mount.position, !!sim.s.gesture && !sim.s.gesture.idle && !sim.s.airborne, clock.elapsedTime);
     renderer.render(scene, camera);
     if (state.debug) drawDebug(dbg, rig, sim);
     frames++; fpsT += dt;

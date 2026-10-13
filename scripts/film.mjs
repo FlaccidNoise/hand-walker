@@ -51,6 +51,7 @@ try {
     await page.evaluate((view, dist) => {
       const h = window.__hand;
       if (view !== 'live') {
+        h.view.hold = true;                                  // the app's follow camera stands down
         const B = h.rig.mount.position, a = h.sim.s.heading, sH = h.calib.standH;
         const fx = Math.cos(a), fz = -Math.sin(a), lx = Math.sin(a), lz = Math.cos(a);   // forward, +z-local
         const V = { side: [0, 0.45, 1], sideL: [0, 0.45, -1], front: [1, 0.5, 0], rear: [-1, 0.8, 0],
