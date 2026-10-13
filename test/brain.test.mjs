@@ -5,7 +5,13 @@ import { makeBrain } from '../src/brain.js';
 import * as C from '../src/tuning.js';
 
 // a sim that moves its body at the commanded velocity and stops dead on zero
-const props = { ids: ['bell'], get: (id) => id === 'bell' ? { anchor: { x: 2, z: 0 }, facing: 0, plan: () => [{ do: 'jump' }] } : null, describe: () => '' };
+const fired = [];                                            // prop events the brain fired, in order
+const THINGS = {
+  bell: { anchor: { x: 2, z: 0 }, facing: 0, plan: () => [{ do: 'jump' }] },
+  box: { anchor: { x: 0.5, z: 0 }, open: 'boxOpen', plan: () => [{ do: 'gesture', name: 'nestle', at: [[0.05, 'boxShut'], [0.1, 'hide']] }],
+    out: () => [{ do: 'gesture', name: 'emerge', at: [[0.05, 'show']] }] },
+};
+const props = { ids: Object.keys(THINGS), get: (id) => THINGS[id] ?? null, fire: (m) => fired.push(m), describe: () => '' };
 function mock(camera = null) {
   const pos = { x: 0, y: 0, z: 0 };
   const s = { heading: 0, speed: 0, planted: 5, airborne: false, gesture: null, pivotTarget: null, time: 0, lastInput: 0 };
@@ -17,7 +23,8 @@ function mock(camera = null) {
     jump() { calls.push(['jump']); },
     pivot(deg) { calls.push(['pivot', deg]); return true; },
   };
-  const brain = makeBrain(sim, { mount: { position: pos } }, camera, props);
+  const rig = { mount: { position: pos } };
+  const brain = makeBrain(sim, rig, camera, props);
   const said = [];                                           // [text, kind] the brain reported
   brain.st.onsay = (text, kind) => said.push([text, kind]);
   const step = (secs) => {
@@ -28,7 +35,7 @@ function mock(camera = null) {
       brain.tick(0.01);
     }
   };
-  return { sim, brain, pos, calls, step, said };
+  return { sim, brain, rig, pos, calls, step, said };
 }
 
 test('a click plan runs, walks to the target and stops there', () => {
@@ -319,4 +326,55 @@ test('while the model is asked, the hand thinks; a rules command does not wait',
   n.brain.ask('jump');
   n.step(0.1);
   assert.ok(!n.calls.some(c => c[1] === 'thinking'));
+});
+
+test('a plan fires its marks: `fire` as an action starts, `at` as its gesture plays', () => {
+  const m = mock(); fired.length = 0;
+  m.brain.command([{ do: 'wait', s: 0.1, fire: 'boxRattle' }, { do: 'gesture', name: 'yes', at: [[0.05, 'boxCrack'], [0.15, 'boxLid']] }], { source: 'click' });
+  m.step(0.05);
+  assert.deepEqual(fired, ['boxRattle']);
+  m.step(0.5);
+  assert.deepEqual(fired, ['boxRattle', 'boxCrack', 'boxLid']);
+});
+
+test('home: the box shuts and the hand goes out of sight, and whatever it is asked next it comes out first', () => {
+  const m = mock(); fired.length = 0;
+  const rig = m.rig.mount;
+  m.brain.command([{ do: 'routine', name: 'home' }], { source: 'click' });
+  assert.deepEqual(m.brain.st.plan.map(a => a.name ?? a.do), ['walkTo', 'nestle']);
+  m.step(3);
+  assert.equal(rig.visible, false);
+  assert.deepEqual(fired, ['boxOpen', 'boxShut']);
+  assert.equal(m.brain.command([{ do: 'routine', name: 'home' }], { source: 'voice' }), true, 'asked to go home at home');
+  assert.equal(m.brain.st.i, -1, 'it stays');
+  m.brain.command([{ do: 'gesture', name: 'yes' }], { source: 'key' });
+  assert.deepEqual(m.brain.st.plan.map(a => a.name ?? a.do), ['emerge', 'yes']);
+  m.step(1);
+  assert.equal(rig.visible, true);
+  m.brain.command([{ do: 'use', target: 'box' }], { source: 'click' }); m.step(3);
+  assert.equal(rig.visible, false, 'a click on the box sends it in');
+  m.brain.command([{ do: 'use', target: 'box' }], { source: 'click' });
+  assert.deepEqual(m.brain.st.plan.map(a => a.name ?? a.do), ['emerge'], 'and another brings it out');
+});
+
+test('home: asked to come out when it is out, it shrugs; hidden far from the box (a reset), it is shown', () => {
+  const m = mock();
+  m.brain.command([{ do: 'routine', name: 'out' }], { source: 'voice' });
+  assert.deepEqual(m.brain.st.plan.map(a => a.name), ['idk']);
+  m.brain.cancel();
+  m.rig.mount.visible = false; m.pos.x = 30;
+  m.brain.command([{ do: 'gesture', name: 'yes' }], { source: 'key' });
+  assert.equal(m.rig.mount.visible, true);
+  assert.deepEqual(m.brain.st.plan.map(a => a.name), ['yes']);
+});
+
+test('a walk that is not an errand to the box ends clear of it', () => {
+  const m = mock();
+  THINGS.box.solid = { x0: 3, x1: 5, z0: -5, z1: -3 };
+  m.brain.command([{ do: 'walkTo', x: 3.9, z: -3.9 }], { source: 'click' }); m.step(0.02);
+  const t = m.brain.st.plan[0].target;
+  assert.ok(t.x <= 2.3 + 1e-9 || t.z >= -2.5 - 1e-9, `target ${t.x}, ${t.z} is inside the box`);
+  m.brain.command([{ do: 'walkTo', x: 3.9, z: -3.9, for: 'box' }], { source: 'click' }); m.step(0.02);
+  assert.deepEqual(m.brain.st.plan[0].target, { x: 3.9, z: -3.9 });
+  delete THINGS.box.solid;
 });

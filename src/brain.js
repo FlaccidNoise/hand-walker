@@ -50,6 +50,20 @@ export function makeBrain(sim, rig, camera, props = null) {
   };
   const say = (text, kind = 'say') => { if (st.onsay) st.onsay(text, kind); else if (kind === 'error') console.warn('[brain]', text); };
   const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); say(msg, 'error'); };
+  // marks: things a plan makes happen in the room as it goes. An action may carry `fire`
+  // (at its start), a gesture `at: [[s, mark], ...]` (as it plays). 'hide' and 'show' are the
+  // hand going out of sight in its box: render visibility only, the sim never knows
+  const mark = (m) => { if (m === 'hide' || m === 'show') body.visible = m === 'show'; else if (props) props.fire(m); };
+  const box = props && props.get('box');
+  // the box is solid to look at and nothing to the sim: a walk that is not an errand to
+  // the box ends outside it, a hand's width clear (0.7 to the side, 0.5 off the front).
+  // The box stands in the +x, -z corner
+  const clearOfBox = (p, a) => {
+    const k = box && a.for !== 'box' && box.solid;
+    if (!k || p.x <= k.x0 - 0.7 || p.z >= k.z1 + 0.5) return p;
+    return p.x - (k.x0 - 0.7) < k.z1 + 0.5 - p.z ? { x: k.x0 - 0.7, z: p.z } : { x: p.x, z: k.z1 + 0.5 };
+  };
+  const atHome = () => body.visible === false && Math.hypot(body.position.x - box.anchor.x, body.position.z - box.anchor.z) < 4;
   const settle = () => { if (st.i < 0 && st.status !== 'idle') setStatus('idle'); };   // no plan came of it: do not stay 'thinking'
 
   const ACTIONS = {
@@ -83,7 +97,9 @@ export function makeBrain(sim, rig, camera, props = null) {
         if (!sim.gesture(a.name)) return RUNNING;        // a hover or a pivot is finishing: try again
         a.started = true; return RUNNING;
       }
-      return sim.s.gesture ? RUNNING : DONE;
+      const g = sim.s.gesture;
+      for (a.k ??= 0; a.at && a.k < a.at.length && (!g || g.t >= a.at[a.k][0]); a.k++) mark(a.at[a.k][1]);
+      return g ? RUNNING : DONE;
     },
     morse(a) {                                           // tap `text` out in real Morse
       if (!a.started) {
@@ -99,10 +115,10 @@ export function makeBrain(sim, rig, camera, props = null) {
     walk(a) {
       if (!a.target) {                                   // hand frame → world, once
         const h = sim.s.heading, f = a.forward ?? 0, r = a.right ?? 0;
-        a.target = clampRoom({
+        a.target = clearOfBox(clampRoom({
           x: body.position.x + f * Math.cos(h) + r * Math.sin(h),
           z: body.position.z - f * Math.sin(h) + r * Math.cos(h),
-        });
+        }), a);
       }
       const dx = a.target.x - body.position.x, dz = a.target.z - body.position.z;
       const d = Math.hypot(dx, dz);
@@ -121,7 +137,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     },
     walkTo(a, dt) {                                      // world-coordinate variant — the
       if (!a.target) {                                   // room map speaks in these
-        a.target = clampRoom({ x: a.x ?? 0, z: a.z ?? 0 });
+        a.target = clearOfBox(clampRoom({ x: a.x ?? 0, z: a.z ?? 0 }), a);
         // timeout from INITIAL distance, frozen — recomputing per-tick shrinks it
         // toward the floor as the hand approaches while elapsed keeps growing,
         // spuriously killing long slow walks (bit the napping behavior at 9s)
@@ -173,7 +189,11 @@ export function makeBrain(sim, rig, camera, props = null) {
     // offended: one rude sign, then off to the far corner to sulk with its back turned
     sulk: () => [{ do: 'gesture', name: 'flipBird' }, { do: 'walkTo', x: -4, z: -4, speed: C.SPEED.scuttle },
       { do: 'face', heading: Math.PI * 0.75 }, { do: 'wait', s: 2 }],
+    // its box: in, and out (asked to come out when it is out, it shrugs)
+    home: () => [{ do: 'use', target: 'box' }],
+    out: () => atHome() ? box.out() : [{ do: 'gesture', name: 'idk' }],
   };
+  const boxy = (a) => (a.do === 'use' && a.target === 'box') || (a.do === 'routine' && (a.name === 'home' || a.name === 'out'));
 
   // a sign is made AT someone (`face` in its def): turn to the viewer first, unless nearly there
   const facing = (plan) => !camera ? plan : plan.flatMap(a => a.do === 'gesture' && GESTURES[a.name]?.face
@@ -182,6 +202,13 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
     plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
+    // out of sight in its box: whatever it is asked, it comes out first. Asked only to go
+    // home, it stays. (Hidden and nowhere near the box: the sim was reset under it. Show it.)
+    if (body.visible === false && box) {
+      if (!atHome()) body.visible = true;
+      else if (plan.every(a => a.do === 'routine' && a.name === 'home')) return true;
+      else plan = [{ do: 'routine', name: 'out' }, ...plan.filter(a => !boxy(a))];
+    }
     let noRoutine = null;
     plan = plan.flatMap(a => a.do !== 'routine' ? [a] : ROUTINES[a.name] ? ROUTINES[a.name]() : (noRoutine = a.name, []));
     if (noRoutine) { fail(`unknown routine "${noRoutine}" — have: ${Object.keys(ROUTINES).join(', ')}`); return false; }
@@ -192,7 +219,7 @@ export function makeBrain(sim, rig, camera, props = null) {
       const p = props && props.get(a.target);
       if (!p) { unknown = a.target; return []; }
       const far = Math.hypot(p.anchor.x - body.position.x, p.anchor.z - body.position.z) > 2.5;
-      const go = [{ do: 'walkTo', x: p.anchor.x, z: p.anchor.z, speed: p.speed ?? (far ? C.SPEED.scuttle : C.SPEED.strut) }];
+      const go = [{ do: 'walkTo', x: p.anchor.x, z: p.anchor.z, speed: p.speed ?? (far ? C.SPEED.scuttle : C.SPEED.strut), fire: p.open }];
       if (p.facing != null) go.push({ do: 'face', heading: p.facing });
       return [...go, ...p.plan()].map(b => ({ ...b, for: a.target }));   // `for`: the page names the errand
     });
@@ -292,6 +319,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     { name: 'knocking on the glass', w: 3, plan: () => [{ do: 'routine', name: 'knock' }] },
     { name: 'dancing', w: 2, plan: () => [{ do: 'routine', name: 'dance' }] },
     { name: 'signalling', w: 1, plan: () => [{ do: 'morse', text: 'sos' }, { do: 'gesture', name: 'point' }] },
+    { name: 'napping in its box', w: 2, plan: () => [{ do: 'use', target: 'box' }, { do: 'wait', s: rnd(6, 10) }, ...box.out()] },
     { name: 'lights out', w: 1, plan: () => [{ do: 'use', target: 'switch' }, { do: 'use', target: 'rug' }, { do: 'use', target: 'switch' }] },
   ];
   let lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER, lastBehavior = null, thinkAt = 0;
@@ -326,6 +354,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (st.i < 0) return;
     planAt = bClock;
     const a = st.plan[st.i];
+    if (a.fire && !a.t) mark(a.fire);
     a.t += dt;
     if (a.t > TIMEOUT[a.do](a)) return fail(`${a.do} timed out (${st.i + 1}/${st.plan.length})`);
     let r;
@@ -350,7 +379,7 @@ Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 - {"do":"wait","s":S}
 - {"do":"use","target":ID} — go to a thing in the room and use it (the state line lists them)
 - {"do":"morse","text":"SOS"} — tap a SHORT word (8 characters at most) on the floor in real Morse code
-- {"do":"routine","name":N} — a set piece: dance (music, spins, a bow), knock (come to the glass, rap on it, wave), sulk (a rude sign, then off to the corner)
+- {"do":"routine","name":N} — a set piece: dance (music, spins, a bow), knock (come to the glass, rap on it, wave), sulk (a rude sign, then off to the corner), home (into your box, and the lid shuts), out (come out of your box)
 Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT — you speak in a dry, warm, upper-class British gentleman's voice, so phrase accordingly ("Right then", "I should think so", "Terribly sorry"). Only use say when a gesture cannot carry the answer.
 YOUR ROOM (a diorama the user looks into from a FIXED camera): floor spans x,z from -${C.ROOM.half} to ${C.ROOM.half}. Solid walls on the west (-x) and north (-z) sides; the north wall has a doorway at (0,-4.5). The south/east sides are open, facing the viewer. Named spots: center (0,0); the little step (0, 2.4) — you can climb on it; back corner (-4,-4); doorway (0,-4.2); front-right corner (4,4) — nearest the viewer.
 SCREEN DIRECTIONS (camera never moves): screen-right = toward +x,-z; screen-left = toward -x,+z; toward the viewer = +x,+z; away = -x,-z. Use these when the user says left/right/closer/back.

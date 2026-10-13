@@ -152,6 +152,25 @@ const PEEK = {
     roll: [[0, 0], [0.12, 0], [0.2, 0.28], [0.42, 0.28], [0.52, -0.28], [0.75, -0.28], [0.85, 0], [1, 0]] },
 };
 
+// cat stretch: up onto the fingertips, slowly, and down again. (Four fingers lifted at once
+// left it standing on the thumb: measured 1 planted.) An idle, and how it leaves its box
+const STRETCH = {
+  dur: 2.8,
+  body: { pitch: [[0, 0], [0.35, -0.3], [0.65, -0.3], [1, 0]], height: [[0, 0], [0.35, 0.08], [0.65, 0.08], [1, 0]] },
+  splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.35, 0.12], [0.65, 0.12], [1, 0]] },
+};
+// lying on its side, pinky edge down, fingers loosely curled: how a hand rests. Measured:
+// - flat on the palm with the fingers curled under, the ring was thrown 1.4 u getting up
+// - straight down while rolling threw the pinky 1.28 u: a 0.2 u hop first, and the fingers
+//   curl only once it is over (LATE, in the digit window's own 0..1)
+// - rolled to -1.7 at lift -0.92 the lowest vertex sits on the floor and the highest at 0.99.
+//   It lies 0.95 u to one side of the wrist and 0.23 to the other, 1.51 ahead (measured)
+// - the thumb folds under the fist: left out, it stuck 1.19 u out to the side
+const LIE_LIFT = -0.92, LIE_ROLL = -1.7, LIE = { yaw: 0, mcp: 0.7, pip: 1.0 };
+const late = (v) => [[0, -v], [0.2, -v], [0.32, 0], [1, 0]];
+const lieDigits = (win) => Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
+  [f, { base: f === 'thumb' ? FIST_THUMB : LIE, win, mcp: late(f === 'thumb' ? 1.3 : 0.7), pip: late(0.5) }]));
+
 export const GESTURES = {
   // nod: a small wind-up, two dips of the stump, a hard stop. The body sinks with the pitch
   // or the planted digits cannot follow (osc(2, 0.16) with no sink moved the stump 7 px on
@@ -319,6 +338,25 @@ export const GESTURES = {
     cue: [[0.28, 'knock']],                    // the thud as it hits the floor
   },
   peek: PEEK,
+  stretch: STRETCH,
+  // into the box: lie down on its side (seated by u 0.22, up from 0.6). The brain shuts the
+  // box at 1.1 s and hides the hand at 1.8 s, so the getting-up is never seen
+  nestle: {
+    dur: 3.6, hover: true,
+    body: { lift: [[0, 0], [0.06, 0.2], [0.22, LIE_LIFT], [0.6, LIE_LIFT], [0.68, 0.45], [0.9, 0.45], [1, 0]],
+      pitch: [[0, 0], [0.18, 0.6], [0.64, 0.6], [0.74, 0], [1, 0]], roll: [[0, 0], [0.04, 0], [0.2, LIE_ROLL], [0.64, LIE_ROLL], [0.74, 0], [1, 0]] },
+    digits: lieDigits([0, 0.74]),
+  },
+  // out of the box: sit up on the stump with the fingers curled (they show under the lid
+  // as it lifts a crack, at 1.2 s), then the lid goes back (2.0 s) and the fingers open.
+  // The front of the box drops at 2.8 s, before the fingers come down onto it
+  emerge: {
+    dur: 4.6, hover: true,
+    body: { ...perch(0.12, 0.56), roll: [[0.47, 0], [0.5, 0.35], [0.53, -0.35], [0.56, 0], [1, 0]] },
+    // (the thumb stays open: curled with the fingers it struck the floor sitting down, 0.31 u in a step)
+    digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f => [f, f === 'thumb' ? { base: CURL, win: HOVER_WIN }
+      : { base: CURL, win: HOVER_WIN, mcp: [[0, 0.5], [0.6, 0.5], [0.69, 0], [1, 0]], pip: [[0, 0.6], [0.6, 0.6], [0.69, 0], [1, 0]] }])),
+  },
   // a flinch: up and back in a tenth of a second, held, then down. (With a finger splay
   // on top the thumb and pinky re-stepped: measured)
   startle: { dur: 0.9, body: { height: [[0, 0], [0.12, 0.1], [0.7, 0.08], [1, 0]], pitch: [[0, 0], [0.12, -0.28], [0.7, -0.24], [1, 0]] } },
@@ -363,13 +401,7 @@ export const IDLES = {
       ring:   { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.6, 0.9] },
     },
   },
-  // cat stretch: up onto the fingertips, slowly, and down again. (Four fingers lifted at once
-  // left it standing on the thumb: measured 1 planted.) The one slow idle
-  stretch: {
-    w: 2, dur: 2.8,
-    body: { pitch: [[0, 0], [0.35, -0.3], [0.65, -0.3], [1, 0]], height: [[0, 0], [0.35, 0.08], [0.65, 0.08], [1, 0]] },
-    splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.35, 0.12], [0.65, 0.12], [1, 0]] },
-  },
+  stretch: { w: 2, ...STRETCH },
   // the head cocks, holds, and snaps back: still, then a twitch
   cock: {
     w: 3, dur: 2.2,

@@ -30,7 +30,8 @@ try {
   const rows = await page.evaluate((LIMIT) => {
     const h = window.__hand, out = [], pump = (s) => { for (let i = 0, n = Math.round(s * 120 / h.C.TIME_SCALE); i < n; i++) window.__vframe(1000 / 120); };
     const plans = [...h.brain.behaviors.map(name => ({ name, start: () => h.brain.behave(name) })),
-      ...h.brain.routines.map(name => ({ name: `routine ${name}`, start: () => h.brain.command([{ do: 'routine', name }], { source: 'click' }) })),
+      // (`out` runs straight after `home`, with no reset between: it has a box to come out of)
+      ...h.brain.routines.map(name => ({ name: `routine ${name}`, keep: name === 'out', start: () => h.brain.command([{ do: 'routine', name }], { source: 'click' }) })),
       ...[0, 1, 2, 3, 4].map(i => ({ name: `poke ${i + 1}`, keep: i > 0, start: () => h.brain.poke() })),
       // a key or a poke that lands mid-walk: the walk must stop, not carry the hand out of the room
       ...[['key', () => h.brain.command([{ do: 'gesture', name: 'wave' }], { source: 'key' })], ['poke', () => h.brain.poke()], ['jump', () => h.brain.command([{ do: 'jump' }], { source: 'key' })]]
