@@ -1,7 +1,8 @@
 // test/gestures.test.mjs — generated gesture tracks (src/gestures.js). Pure node.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GESTURES, morseGesture, MORSE_UNIT, MORSE_MAX, sampleTrack } from '../src/gestures.js';
+import { GESTURES, IDLES, morseGesture, MORSE_UNIT, MORSE_MAX, sampleTrack } from '../src/gestures.js';
+import { POSTURE_PITCH } from '../src/tuning.js';
 
 test('morse: one strike per element, dots and dashes in order, keys strictly increasing', () => {
   const g = morseGesture('SOS');
@@ -27,4 +28,26 @@ test('morse: text is capped, and text with no code gives null', () => {
 test('every cue sits inside its gesture and can fire (a cue at u = 0 never does)', () => {
   for (const [name, def] of Object.entries(GESTURES))
     for (const [u] of def.cue ?? []) assert.ok(u > 0 && u <= 1, `${name} cue at ${u}`);
+});
+
+const ALL = [...Object.entries(GESTURES), ...Object.entries(IDLES)];
+const scan = (track, f) => { for (let u = 0; u <= 1.0001; u += 0.005) f(sampleTrack(track, u), u); };
+
+test('total body pitch stays inside the gimbal margin (posture + track within ±1.2 rad)', () => {
+  for (const [name, def] of ALL)
+    scan(def.body?.pitch, (v) => assert.ok(Math.abs(POSTURE_PITCH + v) <= 1.2, `${name} reaches ${(POSTURE_PITCH + v).toFixed(2)} rad`));
+});
+
+test('a hover poses all five digits, and is level again before the digits re-plant', () => {
+  for (const [name, def] of ALL.filter(([, d]) => d.hover)) {
+    const ends = ['thumb', 'index', 'middle', 'ring', 'pinky'].map(f => (assert.ok(def.digits[f], `${name} leaves the ${f} unposed`), def.digits[f].win[1]));
+    for (const k of ['roll', 'pitch'])
+      scan(def.body[k], (v, u) => { if (u >= Math.min(...ends)) assert.ok(Math.abs(v) < 1e-9, `${name} ${k} is ${v.toFixed(2)} at u=${u.toFixed(2)}`); });
+  }
+});
+
+test('every stance body track starts and ends at zero (no pop in, no pop out)', () => {
+  for (const [name, def] of ALL.filter(([, d]) => !d.hover))
+    for (const [k, track] of Object.entries(def.body ?? {}))
+      assert.ok(Math.abs(sampleTrack(track, 0)) < 1e-9 && Math.abs(sampleTrack(track, 1)) < 1e-9, `${name} ${k}`);
 });

@@ -570,10 +570,11 @@ function makeSim(rig, calib) {
     } else if (!s.airborne && s.f === 0 && s.speed <= C.V_MOVE
         && s.time - s.lastInput > C.IDLE_AFTER && s.time >= s.nextIdleAt) {
       // left alone: weighted-random subtle idle; any input cancels instantly
-      const names = Object.keys(IDLES);
+      const names = Object.keys(IDLES).filter(n => n !== s.lastIdle);   // never the same fidget twice running
       let r = rand() * names.reduce((a, n) => a + IDLES[n].w, 0);
       const name = names.find(n => (r -= IDLES[n].w) <= 0) ?? names[0];
       s.gesture = { name, t: 0, dur: IDLES[name].dur, def: IDLES[name], idle: true };
+      s.lastIdle = name;
       s.nextIdleAt = s.time + IDLES[name].dur + C.IDLE_GAP * (0.7 + 0.6 * rand());
     }
     s.planted = s.airborne ? 0 : FINGERS.filter(f => legs[f].mode === 'stance').length;
@@ -586,12 +587,14 @@ function makeSim(rig, calib) {
       rig.palmDepth + C.BELLY_CLEAR);
     s.rideH += (rideT - s.rideH) * (1 - Math.exp(-dt / C.RIDE_TAU)); // eased — no stop-pop
     // body secondary motion: two damped springs carry twitches (kick()): a nod per
-    // footfall, a lean into a start, one nod as a stop bites. The body still rides level
+    // footfall, a wind-up on a start, one nod as a stop bites. The body still rides level
     // and the fingers do the work. Planted tips do not move: the stance solve absorbs it.
     // (A/B'd and dropped for costing grip: a ride-height bob per lifted digit, slide
     // +10-30% and stop settle 0.56 → 1.35 s; lean into acceleration, run slide +25%.)
+    // (armed on the commanded speed this fired on every step of a start, about 12 in a
+    // row: the hand reared 0.22 rad as it left, where one small kick was meant)
     if (stopKick && s.speed < C.V_MOVE) { stopKick = false; kick(C.STOP_KICK, 0); }
-    if (cmdSpeed > C.V_MOVE) stopKick = true;
+    if (s.speed > C.V_MOVE) stopKick = true;
     for (const q of [s.spr.pitch, s.spr.roll]) {
       q.v += (-C.BODY_K * q.x - C.BODY_C * q.v) * dt;         // semi-implicit Euler: stable at SIM_DT
       q.x += q.v * dt;
@@ -659,7 +662,7 @@ function makeSim(rig, calib) {
       // cadence floor: a slow walk takes shorter steps at a natural beat instead of
       // holding a swing in the air for seconds (and a start steps at once)
       const starting = s.f === 0;
-      if (starting && s.pivotTarget == null) kick(-C.GO_KICK, 0);   // lean into the first step
+      if (starting && s.pivotTarget == null) kick(C.GO_KICK, 0);    // wind up: rear back as the first step lifts
       s.f = Math.min(Math.max(f, C.F_MIN), gd.fMax);
       s.vEff = v;
       // decisive, repeatable start: enter the cycle at the gait's own entry phase, so
@@ -752,7 +755,7 @@ function makeSim(rig, calib) {
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
     s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.carry = null; s.pivotTarget = null; s.turnWait = 0; s.hop = null;
-    s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = 1;
+    s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = DEV ? 1 : Date.now() % 0x7fffffff || 1; s.lastIdle = null;
     s.spr.pitch.x = s.spr.pitch.v = s.spr.roll.x = s.spr.roll.v = 0; stopKick = false;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();

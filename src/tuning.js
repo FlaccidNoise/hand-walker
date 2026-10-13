@@ -134,7 +134,7 @@ export const RIDE_TAU = 0.3;          // s — ride-height easing; an instant cr
 export const BODY_K = 480;            // 1/s² — spring rate (ω ≈ 22 rad/s, a 0.29 s nod)
 export const BODY_C = 24;             // 1/s — damping (ζ ≈ 0.55: one small overshoot)
 export const STEP_KICK = 0.3;         // rad/s into pitch per footfall (roll gets 1.4×, toward the landing side)
-export const GO_KICK = 1.3;           // rad/s nose-down on a start (≈ 3°)
+export const GO_KICK = 4;             // rad/s rear-back wind-up on a start (≈ 5°; +8 re-steps a resting digit)
 export const STOP_KICK = 1.1;         // rad/s nose-up as a stop bites
 export const LAND_KEEP = 0.35;        // share of the fall speed kept at touchdown (0.1 landed dead)
 
