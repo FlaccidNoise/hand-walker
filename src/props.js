@@ -9,8 +9,9 @@ import { PAINT } from './paint.js';
 
 // ---- pure prop logic (unit-tested in test/props.test.mjs) ----
 
-// ball: rolls, slows, bounces off the room, takes an impulse from the hand's body
-const BODY_R = 0.6, ROLL_DECEL = 0.55, WALL_REST = 0.6;
+// ball: rolls, slows, bounces off the room, takes an impulse from the hand's body.
+// Returns true when it bounces off a wall hard enough to be worth a look (WALL_LOUD u/s)
+const BODY_R = 0.6, ROLL_DECEL = 0.55, WALL_REST = 0.6, WALL_LOUD = 0.4;
 export function stepBall(b, dt, hand) {
   const dx = b.x - hand.x, dz = b.z - hand.z, d = Math.hypot(dx, dz), contact = b.r + BODY_R;
   if (d < contact && d > 1e-6 && hand.y < 2.2) {            // (a jumping hand clears it)
@@ -23,8 +24,10 @@ export function stepBall(b, dt, hand) {
   if (s > 0) { const k = Math.max(0, s - ROLL_DECEL * dt) / s; b.vx *= k; b.vz *= k; }
   b.x += b.vx * dt; b.z += b.vz * dt;
   const lim = C.ROOM.wall - 0.1 - b.r;
-  if (Math.abs(b.x) > lim) { b.x = Math.sign(b.x) * lim; b.vx = -b.vx * WALL_REST; }
-  if (Math.abs(b.z) > lim) { b.z = Math.sign(b.z) * lim; b.vz = -b.vz * WALL_REST; }
+  let hit = 0;
+  if (Math.abs(b.x) > lim) { hit = Math.abs(b.vx); b.x = Math.sign(b.x) * lim; b.vx = -b.vx * WALL_REST; }
+  if (Math.abs(b.z) > lim) { hit = Math.max(hit, Math.abs(b.vz)); b.z = Math.sign(b.z) * lim; b.vz = -b.vz * WALL_REST; }
+  return hit > WALL_LOUD && d >= contact;                     // (a ball the hand is pressing into the wall is not a bounce)
 }
 
 // bell: rings when the hand LANDS on or beside it (a jump). One ring per landing.
@@ -116,6 +119,7 @@ export const SOUNDS = {
   dit: () => tone([[660, 1]], 0.03, 0.14, { hold: 0.1 }),    // Morse: a dot is one unit of wall time
   dah: () => tone([[660, 1]], 0.03, 0.14, { hold: 0.4 }),
   hat: () => tick(7000, 0.04, 0.12),
+  tick: () => tick(1500, 0.03, 0.1),                          // a fingertip rapped on the floor
   beat0: beat(0), beat1: beat(1), beat2: beat(2), beat3: beat(3),
   note: (hz) => tone([[hz, 1], [hz * 2, 0.25], [hz * 3, 0.08]], 1.2, 0.2),
   step: (f, speed) => tick(STEP_HZ[f] ?? 1400, 0.03, 0.05 + 0.05 * Math.min(speed / 2, 1)),
@@ -214,7 +218,7 @@ export function makeProps({ scene, lights }) {
   // `plan`: what the hand does once it stands at `anchor` facing `facing` (world heading, rad)
   const P = {
     switch: { label: 'light switch', mesh: plate, anchor: { x: 2.4, z: -C.ROOM.half }, facing: Math.PI / 2,
-      plan: () => [{ do: 'jump' }, { do: 'wait', s: 0.5 }, { do: 'gesture', name: state.lights ? 'thumbsUp' : 'thinking' }] },
+      plan: () => [{ do: 'jump' }] },                         // what it makes of the result is a reaction (onEvent)
     bell: { label: 'bell', mesh: bellG, anchor: { x: -3.2, z: 3.2 }, plan: () => [{ do: 'jump' }] },
     ball: { label: 'ball', mesh: ballM, get anchor() { return { x: ball.x, z: ball.z }; }, speed: C.SPEED.scuttle, plan: () => [] },
     rug: { label: 'rug', mesh: rug, anchor: { x: -3.5, z: -3.5 }, plan: () => [{ do: 'gesture', name: 'sleep' }] },
@@ -226,13 +230,17 @@ export function makeProps({ scene, lights }) {
         return [{ do: 'walkTo', x: xMid, z: b, speed: C.SPEED.strut }, { do: 'walkTo', x: xMid, z: a, speed: C.SPEED.scuttle }, { do: 'gesture', name: 'bow' }];
       } },
   };
+  // things that happen in the room are told to whoever listens (the brain: the hand reacts).
+  // Events go out, hand state never comes in
+  let onEvent = null;
   const fire = {
-    switch() { state.lights = !state.lights; toggle.rotation.x = state.lights ? 0 : 0.5; SOUNDS.click(); },
-    bell() { state.ringT = 0; SOUNDS.ding(); },
+    switch() { state.lights = !state.lights; toggle.rotation.x = state.lights ? 0 : 0.5; SOUNDS.click(); onEvent?.(state.lights ? 'lightsOn' : 'lightsOff'); },
+    bell() { state.ringT = 0; SOUNDS.ding(); onEvent?.('bell'); },
   };
 
   return {
     ids: Object.keys(P), get: (id) => P[id], state, fire: (id) => fire[id] && fire[id](),
+    set onEvent(f) { onEvent = f; },
     // sensed props + animation. hand = { x, y, z, vx, vz, airborne }
     // a fingertip came down at (x, z): a piano key plays its note, the bare floor ticks
     footfall(f, x, z, speed) {
@@ -248,7 +256,7 @@ export function makeProps({ scene, lights }) {
       }
       if (switchFlips(sw, hand)) fire.switch();
       if (bellRings({ x: -3.2, z: 3.2, r: 0.9 }, hand, landed)) fire.bell();
-      stepBall(ball, dt, hand);
+      if (stepBall(ball, dt, hand)) onEvent?.('wall', { x: ball.x, z: ball.z });
       ballM.position.set(ball.x, ball.r, ball.z);
       const s = Math.hypot(ball.vx, ball.vz);
       if (s > 1e-4) { axis.set(ball.vz / s, 0, -ball.vx / s); ballM.rotateOnWorldAxis(axis, s * dt / ball.r); }
