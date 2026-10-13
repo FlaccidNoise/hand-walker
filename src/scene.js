@@ -4,8 +4,21 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { OBSTACLES, CELL, EXTENT, vertexH } from './terrain.js';
 import { ROOM } from './tuning.js';
+import { PAINT, paintStats } from './paint.js';
 
-const FIT_ASPECT = 1.3;              // width / height below which the room no longer fits the view
+// ?dev is the gates' and film.mjs's view: QA walks the bump field outside the room, so
+// that field, its wire and the wide shadow frustum stay. The shipped page shows the room
+// alone, a model on a dark table.
+const DEV = new URLSearchParams(location.search).has('dev');
+
+// the fixed view, as eye (camera − target), target and fov. Two rigs, blended by window
+// shape: a wide window takes the long lens, a phone held upright looks down from higher
+// so the room fills it (its side corners are cropped). Both stand at azimuth 39.6°, so
+// the brain's screen directions hold at every shape.
+const CAM_WIDE = { fov: 36, eye: [9.95, 6.31, 11.99], target: [0, 0.3, 0.3] };    // aspect ≥ 1.6
+const CAM_TALL = { fov: 50, eye: [12.23, 16.09, 14.84], target: [0.9, 0, 1.0] };  // aspect ≤ 0.46
+
+const std = (color, roughness, o) => new THREE.MeshStandardMaterial({ color, roughness, ...o });
 
 export function buildScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -18,67 +31,76 @@ export function buildScene(container) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0c1018);
-  scene.fog = new THREE.Fog(0x0c1018, 8, 40);
+  scene.userData.paint = paintStats;    // ms spent painting textures (props.js adds its own)
+  scene.background = PAINT.sky();
+  scene.fog = new THREE.Fog(0x0b0908, 22, 48);               // swallows the table's edge, not the room
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.45;    // full IBL floods shadows + facet shading flat —
-                                        // terrain relief at walkable slopes needs the contrast
+  scene.environmentIntensity = 0.25;    // full IBL floods shadows and greys the wood
 
   // fixed diorama camera: we look INTO Thing's room; orbit is a debug-only tool
   // (backtick re-enables it — see main.js)
-  const camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.01, 200);
-  camera.position.set(7.8, 5.4, 9.4);
-  camera.lookAt(0, 0.45, 0);
-
+  const camera = new THREE.PerspectiveCamera(CAM_WIDE.fov, container.clientWidth / container.clientHeight, 0.01, 200);
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0.45, 0);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
   controls.minDistance = 0.4;
   controls.maxDistance = 30;
   controls.enabled = false;
-  controls.update();
 
-  // --- light rig ---
-  const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x2a2018, 0.55);
+  // --- light rig: one warm key (the sconce's light, props.js) against cool moonlight.
+  // props.js owns the levels from here on: it eases them when the switch flips. ---
+  const hemi = new THREE.HemisphereLight(0x9aa3b8, 0x2a1a10, 0.3);
   scene.add(hemi);
-  const key = new THREE.DirectionalLight(0xfff2d8, 2.0);
-  key.position.set(8, 4, 2);                 // grazing elevation (~26°): long shadows are
-  key.castShadow = true;                     // the strongest relief cue walkable slopes get
+  const key = new THREE.DirectionalLight(0xffd9ae, 2.5);
+  key.position.set(8, 4.6, 3);               // low (~28°): long finger shadows across the boards
+  key.castShadow = true;
   key.shadow.mapSize.set(4096, 4096);
-  const s = 18;                              // cover the bump field, not just the spawn disc
+  const s = DEV ? 18 : 9;                    // the room alone, or the gates' whole bump field
   key.shadow.camera.left = -s; key.shadow.camera.right = s;
   key.shadow.camera.top = s; key.shadow.camera.bottom = -s;
   key.shadow.camera.near = 0.5; key.shadow.camera.far = 25;
   key.shadow.bias = -0.0004;
+  key.shadow.normalBias = 0.03;              // the hand shadows itself: no acne on its coarse skin
   scene.add(key);
-  const amb = new THREE.AmbientLight(0x404858, 0.4);
+  const amb = new THREE.AmbientLight(0x2a2030, 0.32);
   scene.add(amb);
+  const rim = new THREE.DirectionalLight(0x7f9cff, 0.4);     // moon, from behind the back corner
+  rim.position.set(-5, 6, -9);
+  scene.add(rim);
 
   const ground = rebuildGround();
   scene.add(ground.group);
 
-  // a narrow window (a phone held upright) crops the room's sides at this field of
-  // view: back the camera off along its line of sight until the room fits again
-  const camHome = camera.position.clone(), eye = camHome.clone().sub(controls.target);
+  // `view` is the fixed view for this window shape and camHome the camera position it
+  // gives. Both are live: frame() rewrites them on resize, so a follow or a dolly can
+  // offset them each frame without touching frame().
+  const view = { eye: new THREE.Vector3(), target: new THREE.Vector3(), fov: CAM_WIDE.fov };
+  const camHome = new THREE.Vector3(), _v = new THREE.Vector3();
   const frame = () => {
-    const k = Math.max(1, FIT_ASPECT / camera.aspect);
-    camHome.copy(controls.target).addScaledVector(eye, k);
-    scene.fog.near = 8 * k; scene.fog.far = 40 * k;          // the fog keeps its place in the room
-    if (!controls.enabled) camera.position.copy(camHome);
+    const p = THREE.MathUtils.clamp((1.6 - camera.aspect) / 1.14, 0, 1);
+    view.eye.fromArray(CAM_WIDE.eye).lerp(_v.fromArray(CAM_TALL.eye), p);
+    view.target.fromArray(CAM_WIDE.target).lerp(_v.fromArray(CAM_TALL.target), p);
+    view.fov = THREE.MathUtils.lerp(CAM_WIDE.fov, CAM_TALL.fov, p);
+    camHome.copy(view.target).add(view.eye);
+    const d = view.eye.length();
+    scene.fog.near = d + 6; scene.fog.far = d + 32;          // the fog keeps its place behind the room
+    camera.fov = view.fov; camera.updateProjectionMatrix();
+    if (controls.enabled) return;                            // the debug orbit keeps its own view
+    camera.position.copy(camHome); controls.target.copy(view.target); camera.lookAt(view.target);
   };
   frame();
+  controls.update();
   const onResize = () => {
     const w = container.clientWidth, h = container.clientHeight;
-    camera.aspect = w / h; camera.updateProjectionMatrix();
+    camera.aspect = w / h;
     renderer.setSize(w, h);
     frame();
   };
   window.addEventListener('resize', onResize);
 
-  return { renderer, scene, camera, camHome, controls, ground, pmrem, lights: { hemi, key, amb }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
+  return { renderer, scene, camera, camHome, view, controls, ground, pmrem, lights: { hemi, key, amb, rim }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
 }
 
 // ground: low-poly terrain mesh built by sampling terrain.js's vertexH on the SAME
@@ -121,31 +143,38 @@ export function rebuildGround() {
   const wire = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
     wireframe: true, color: 0x3a4458, transparent: true, opacity: 0.4 }));
   group.add(wire);
-  const stepMat = new THREE.MeshStandardMaterial({ color: 0x384258, roughness: 0.9, metalness: 0.0 });
-  for (const o of OBSTACLES) {
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(o.x1 - o.x0, o.h, o.z1 - o.z0), stepMat);
-    box.position.set((o.x0 + o.x1) / 2, o.h / 2, (o.z0 + o.z1) / 2);
-    box.castShadow = true; box.receiveShadow = true;
-    group.add(box);
-  }
+  mesh.visible = wire.visible = DEV;                       // the bump field is QA's ground, not the room's
+
+  const add = (m, x, y, z, cast = true) => {
+    m.position.set(x, y, z);
+    m.castShadow = cast; m.receiveShadow = true;
+    group.add(m);
+    return m;
+  };
+  // the step is a book left on the floor: spine on the -x side, pages on the others
+  const cover = std(0x4a1616, 0.55), pages = std(0xc9bb98, 0.9);
+  const bookMats = [pages, cover, std(0xffffff, 0.55, { map: PAINT.book() }), cover, pages, pages];
+  for (const o of OBSTACLES)
+    add(new THREE.Mesh(new THREE.BoxGeometry(o.x1 - o.x0, o.h, o.z1 - o.z0), bookMats),
+      (o.x0 + o.x1) / 2, o.h / 2, (o.z0 + o.z1) / 2);
 
   // Thing's room (diorama): floor tile + two back walls with a doorway, open
   // toward the fixed camera (+x+z). Walls are VISUAL ONLY — no sim collision (QA's
   // +x corridor runs "through" the east wall headlessly); the brain clamps every
   // walk target to the room instead, and that's the only control path there is.
   const R = ROOM.wall, WALL_H = 2.4, T = 0.18;
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x2b3450, roughness: 0.9, flatShading: true });
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(2 * R, 0.04, 2 * R), floorMat);
-  floor.position.set(0, -0.018, 0);                          // top face at y≈0.002 over the flat ground
-  floor.receiveShadow = true;
-  group.add(floor);
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x333e5e, roughness: 0.92, flatShading: true });
+  // top face at y≈0.002 over the flat ground
+  add(new THREE.Mesh(new THREE.BoxGeometry(2 * R, 0.04, 2 * R), std(0xffffff, 0.62, { map: PAINT.floor() })), 0, -0.018, 0, false);
+  // paper on the room face only. Every other face shows the dark section cut, so the
+  // wall tops read as a model sawn open. UVs come from world position: the stripes run
+  // unbroken across the doorway's three pieces.
+  const paper = std(0xffffff, 0.9, { map: PAINT.wall() }), cut = std(0x120c09, 0.8), TILE = 1.2;
   const wall = (w, h, d, x, y, z) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
-    m.position.set(x, y, z);
-    m.castShadow = true; m.receiveShadow = true;
-    group.add(m);
+    const geo = new THREE.BoxGeometry(w, h, d), p = geo.attributes.position, uv = geo.attributes.uv, west = d > w;
+    for (let i = 0; i < p.count; i++) uv.setXY(i, (west ? p.getZ(i) + z : p.getX(i) + x) / TILE, (p.getY(i) + y) / WALL_H);
+    const mats = Array(6).fill(cut);
+    mats[west ? 0 : 4] = paper;                              // BoxGeometry face order: +x -x +y -y +z -z
+    add(new THREE.Mesh(geo, mats), x, y, z);
   };
   wall(T, WALL_H, 2 * R + T, -R - T / 2, WALL_H / 2, 0);     // west wall (back-left)
   const DOOR_W = 1.6, DOOR_H = 1.7;                          // doorway in the north wall
@@ -153,5 +182,23 @@ export function rebuildGround() {
   wall(seg, WALL_H, T, -R + seg / 2, WALL_H / 2, -R - T / 2);
   wall(seg, WALL_H, T, R - seg / 2, WALL_H / 2, -R - T / 2);
   wall(DOOR_W, WALL_H - DOOR_H, T, 0, DOOR_H + (WALL_H - DOOR_H) / 2, -R - T / 2);  // lintel
+  const trim = std(0x2a1a11, 0.6), TW = 0.14;                // door frame
+  for (const sx of [-1, 1]) add(new THREE.Mesh(new THREE.BoxGeometry(TW, DOOR_H + TW, 0.08), trim), sx * (DOOR_W + TW) / 2, (DOOR_H + TW) / 2, -R + 0.04);
+  add(new THREE.Mesh(new THREE.BoxGeometry(DOOR_W + 2 * TW, TW, 0.08), trim), 0, DOOR_H + TW / 2, -R + 0.04);
+  // two ancestors on the west wall, above the reach of a standing hand's fingers
+  const brass = std(0x8a6a34, 0.4, { metalness: 0.6 });
+  for (const [z, y, w, h, hue] of [[2.6, 1.55, 0.7, 0.9, 20], [3.7, 1.5, 0.5, 0.62, 200]]) {
+    add(new THREE.Mesh(new THREE.BoxGeometry(0.05, h + 0.12, w + 0.12), brass), -R + 0.025, y, z);
+    const pic = add(new THREE.Mesh(new THREE.PlaneGeometry(w, h), std(0xffffff, 0.8, { map: PAINT.portrait(hue) })), -R + 0.065, y, z, false);
+    pic.rotation.y = Math.PI / 2; pic.receiveShadow = false;   // its own frame would hatch it
+  }
+  if (!DEV) {
+    // the room is a model on a dark table. The doorway looks down a hall: the camera
+    // sees only the hall's floor through it, so that floor is the whole hall.
+    add(new THREE.Mesh(new THREE.BoxGeometry(2 * R + 2 * T, 0.5, 2 * R + 2 * T), std(0x120c09, 0.7)), -T / 2, -0.29, -T / 2, false);
+    add(new THREE.Mesh(new THREE.CircleGeometry(40, 48), std(0x0c0908, 0.95)), 0, -0.54, 0, false).rotation.x = -Math.PI / 2;
+    add(new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.2), new THREE.MeshBasicMaterial({ map: PAINT.hall(), fog: false })),
+      0, 0.001, -R - T - 1.6, false).rotation.x = -Math.PI / 2;
+  }
   return { group, mesh };
 }

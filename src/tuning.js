@@ -57,7 +57,9 @@ export const BAND_UTIL = 0.8;          // cadence law targets this fraction of t
                                        // 0.9/1.0 raise edge drift more than fewer steps save
 
 // --- Room (diorama): one size for the brain clamp, the walls, and the flat floor ---
-export const ROOM = { half: 4.8, wall: 5.5 };   // walk-target clamp · wall plane
+export const ROOM = { half: 4.8, wall: 5.75 };  // walk-target clamp (on the wrist) · wall plane. The
+                                                // fingers lead the wrist by up to 1.67 u: a hand that
+                                                // walks straight at a wall still reaches through it
 
 // --- Steering ---
 export const V_MAX = 3.4;             // u/s leash top — raised from 2.6: at 2.5 the user
