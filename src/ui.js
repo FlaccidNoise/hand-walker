@@ -146,7 +146,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   const did = (what) => { if (hintI < HINTS.length && HINTS[hintI][0] === what) { hintI++; hintT = 0; } };
 
   // line 1: what the hand is doing, in a visitor's words
-  function doing() {
+  function caption() {
     if (listening) return heard ? `heard “${heard}”` : 'listening…';
     const st = brain.st, a = st.i >= 0 ? st.plan[st.i] : null;
     if (st.status === 'thinking') return 'thinking…';
@@ -171,7 +171,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     if (sayT > 0 && (sayT -= dt) <= 0) said = '';
     offer();
 
-    const line = doing();
+    const line = caption();
     if (capDo.textContent !== line) capDo.textContent = line;   // only on change: the node is a live region
     if (capSay.textContent !== said) capSay.textContent = said;
     cap.hidden = !line && !said;
@@ -183,5 +183,5 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     const y = THREE.MathUtils.clamp(rect.top + (1 - at.y) / 2 * rect.height, 12 + cap.offsetHeight, floor);
     cap.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -100%)`;
   }
-  return { update, cue, did, notice };
+  return { update, cue, did, notice, caption };
 }

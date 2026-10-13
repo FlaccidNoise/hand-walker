@@ -82,6 +82,7 @@
   #talk svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
   /* one line under the box: the voice hint, or the model offer and its progress. Its height never changes. */
   #under { margin-top:-3px; font-size:13px; font-style:italic; color:var(--ink2); line-height:24px; }
+  #under, #title, #soundTip { text-shadow:0 1px 3px #000, 0 0 8px #000; }   /* bare text over the room */
   @media (pointer:fine) { #under { height:24px; } }
   #brainRow:not([hidden]) ~ #talkHint, #under:has(#brainRow:not([hidden])) #talkHint { display:none; }
   #brainBtn { min-height:0; padding:0 10px; font-size:13px; font-style:normal; }
