@@ -1,7 +1,8 @@
 // test/rules.test.mjs — keyword rules (src/rules.js). Pure node.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRules, isQuestion } from '../src/rules.js';
+import { readFileSync } from 'node:fs';
+import { parseRules, isQuestion, isHelp } from '../src/rules.js';
 import { GESTURES } from '../src/gestures.js';
 import * as C from '../src/tuning.js';
 
@@ -64,4 +65,21 @@ test('morse, routines, the piano and playing dead', () => {
   assert.ok(GESTURES.playDead && GESTURES.dance && GESTURES.knock);
   assert.deepEqual(parseRules('play with the ball'), [{ do: 'use', target: 'ball' }]);
   assert.equal(one('tap').name, 'tap', 'a bare tap is still the impatient drum');
+});
+
+test('"come back" comes to the front, and help is the page\'s to answer', () => {
+  assert.deepEqual(one('come back'), { do: 'walkTo', x: 3.5, z: 3.5, speed: C.SPEED.strut });
+  assert.ok(one('go back').x < 0, 'a bare "back" is still away from the viewer');
+  assert.ok(isHelp('help') && isHelp('What can you do?') && !isHelp('help yourself to a nap'));
+});
+
+test('every card and palette entry on the page is a command the rules know', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const says = [...html.matchAll(/data-say="([^"]+)"/g)].map(m => m[1]);
+  assert.ok(says.length > 20, `found ${says.length}`);
+  for (const t of says) {
+    const plan = parseRules(t);
+    assert.ok(plan, `"${t}" has no rule`);
+    for (const a of plan) if (a.do === 'gesture') assert.ok(GESTURES[a.name], `"${t}" → ${a.name}`);
+  }
 });

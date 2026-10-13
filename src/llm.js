@@ -64,7 +64,7 @@ export function firstObject(raw) {
   return JSON.parse(t.slice(a, b + 1));
 }
 
-export function makeLocalLLM(onStatus = () => {}) {
+export function makeLocalLLM(onProgress = () => {}) {       // onProgress(pct): 0-100, or null when unknown
   let engine = null, loading = null;
   const chat = async (system, text) => {
     const r = await engine.chat.completions.create({
@@ -82,10 +82,10 @@ export function makeLocalLLM(onStatus = () => {}) {
       if (!this.supported) return Promise.reject(new Error('this browser has no WebGPU — use a current Chrome, Edge or Safari'));
       return loading ??= (async () => {
         try {
-          onStatus(`fetching the brain (${LOCAL_MODEL.size})…`);
+          onProgress(null);
           const webllm = await import(WEBLLM);
           engine = await webllm.CreateMLCEngine(LOCAL_MODEL.id, {
-            initProgressCallback: (p) => onStatus(`loading the brain ${p.progress != null ? Math.round(p.progress * 100) + '%' : '…'}`),
+            initProgressCallback: (p) => onProgress(p.progress != null ? Math.round(p.progress * 100) : null),
           });
           return true;
         } finally { loading = null; }

@@ -10,7 +10,7 @@ const SPOTS = [
   [/\b(step|box|block)\b/, { x: 0, z: 2.4 }],
   [/\b(corner|bed)\b/, { x: -4, z: -4 }],
   [/\b(door|doorway)\b/, { x: 0, z: -4.2 }],
-  [/\b(come here|come closer|over here|to me|front)\b/, { x: 3.5, z: 3.5 }],
+  [/\b(come here|come back|come closer|over here|to me|front)\b/, { x: 3.5, z: 3.5 }],
 ];
 const S = Math.SQRT1_2;
 const SCREEN = { left: [-S, S], right: [S, -S], closer: [S, S], forward: [S, S], back: [-S, -S], away: [-S, -S] };
@@ -87,3 +87,6 @@ export function parseRules(text, pos = { x: 0, z: 0 }) {
 export const isQuestion = (text) =>
   /^\s*(do|does|did|is|are|was|were|can|could|will|would|should|am|have|has|what|who|why|how|where|when|which)\b/i.test(text)
   || text.trim().endsWith('?');
+
+// a request for the list of what works: the page answers it with the palette, not the hand
+export const isHelp = (text) => /^\s*(help|menu|commands?|what (can|do) (you|it|i) (do|say|know))[\s?.!]*$/i.test(text);
