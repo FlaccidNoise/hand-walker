@@ -12,6 +12,7 @@ import { parseRules, isQuestion } from './rules.js';
 import { makeLocalLLM, LOCAL_MODEL } from './llm.js';
 
 const RUNNING = 0, DONE = 1;
+const CROUCH_S = 0.16;                                   // s sim of crouch before a jump leaves (the anticipation)
 
 // Gemini's JSON mode isn't airtight — it sometimes appends trailing "thinking out
 // loud" text after a complete, valid JSON object. Parse just the first balanced
@@ -50,14 +51,24 @@ export function makeBrain(sim, rig, camera, props = null) {
       a.left = (a.left ?? Math.min(a.s ?? 1, 30)) - dt;
       return a.left <= 0 ? DONE : RUNNING;
     },
-    jump(a) {
-      if (!a.started) {
+    jump(a) {                                            // crouch, spring, squash on landing
+      if (!a.phase) {
         // land a prior jump first, and push off all five: jump energy scales with planted
         // digits (a jump taken mid-step reached 1.68 u of the 2.32 it should)
         if (sim.s.airborne || sim.s.planted < 5 || sim.s.speed > C.V_MOVE) return RUNNING;
-        sim.jump(); a.started = true; return RUNNING;
+        if (sim.gesture('crouch')) a.phase = 'crouch';   // (refused while a hover or a pivot finishes)
+        return RUNNING;
       }
-      return sim.s.airborne ? RUNNING : DONE;
+      const g = sim.s.gesture;
+      if (a.phase === 'crouch') {                        // spring from the bottom of the crouch
+        if (g && g.name === 'crouch' && g.t < CROUCH_S) return RUNNING;
+        sim.jump(); a.phase = 'air'; return RUNNING;
+      }
+      if (a.phase === 'air') {
+        if (sim.s.airborne) return RUNNING;
+        sim.gesture('land'); a.phase = 'land'; return RUNNING;
+      }
+      return g ? RUNNING : DONE;
     },
     gesture(a) {
       if (!a.started) {
@@ -158,6 +169,9 @@ export function makeBrain(sim, rig, camera, props = null) {
       { do: 'face', heading: Math.PI * 0.75 }, { do: 'wait', s: 2 }],
   };
 
+  // a sign is made AT someone (`face` in its def): turn to the viewer first, unless nearly there
+  const facing = (plan) => !camera ? plan : plan.flatMap(a => a.do === 'gesture' && GESTURES[a.name]?.face
+    ? [{ do: 'face', viewer: true, off: GESTURES[a.name].face === true ? 0 : GESTURES[a.name].face, within: FACE_WITHIN }, a] : [a]);
   function run(plan, tag = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
@@ -177,9 +191,7 @@ export function makeBrain(sim, rig, camera, props = null) {
       return [...go, ...p.plan()];
     });
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
-    // a sign is made AT someone (`face` in its def): turn to the viewer first, unless nearly there
-    if (camera) plan = plan.flatMap(a => a.do === 'gesture' && GESTURES[a.name]?.face
-      ? [{ do: 'face', viewer: true, off: GESTURES[a.name].face === true ? 0 : GESTURES[a.name].face, within: FACE_WITHIN }, a] : [a]);
+    plan = facing(plan);
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
     st.i = 0;
@@ -205,6 +217,29 @@ export function makeBrain(sim, rig, camera, props = null) {
     return true;
   }
   const cancel = () => { owner = 'auto'; stop(); };
+
+  // ---- reactions: the room tells the hand what just happened (props.onEvent) and it has an
+  // opinion. Only a hand that is doing something, or just was, reacts: the QA gate drives
+  // the sim with no plan at all, so nothing here can fire inside a scenario.
+  const REACT = {
+    lightsOff: () => [{ do: 'wait', s: 0.6 }, { do: 'gesture', name: 'peek' }],   // dead still in the dark, then a look round
+    lightsOn: () => [{ do: 'gesture', name: 'thumbsUp' }],
+    bell: () => [{ do: 'gesture', name: 'startle' }],
+    wall: (at) => [{ do: 'face', heading: Math.atan2(-(at.z - body.position.z), at.x - body.position.x) }, { do: 'gesture', name: 'laugh' }],
+  };
+  const REACT_WINDOW = 2;                                // s since a plan last ran
+  let planAt = -1e9;
+  function react(ev, arg) {
+    if (!REACT[ev] || bClock - planAt > REACT_WINDOW) return false;
+    if (st.i >= 0 && st.plan.some((a, k) => k >= st.i && a.re === ev)) return false;   // one opinion per event, not a queue
+    const plan = facing(REACT[ev](arg)).map(a => ({ ...a, re: ev }));
+    if (st.i < 0) return command(plan, { source: 'auto', tag: 'reacting' });
+    // right after what it is doing now (or before it, when that has not begun: the event
+    // came in the tick its cause finished)
+    st.plan.splice(st.plan[st.i].t ? st.i + 1 : st.i, 0, ...plan.map(a => ({ ...a, t: 0 })));
+    return true;
+  }
+  if (props) props.onEvent = react;
 
   // ---- poked (a click on the hand itself): ticklish, then startled, then cross.
   // The count decays, so an occasional poke is always a giggle.
@@ -242,14 +277,16 @@ export function makeBrain(sim, rig, camera, props = null) {
       { do: 'gesture', name: 'thinking' } ] },
     // the room is there to be played with
     { name: 'playing the piano', w: 3, plan: () => [{ do: 'use', target: 'piano' }] },
-    { name: 'chasing the ball', w: 3, plan: () => [{ do: 'use', target: 'ball' }, { do: 'wait', s: 0.6 }, { do: 'gesture', name: 'laugh' }] },
+    // (it laughs when the ball hits the wall, and flinches at its own bell: reactions)
+    { name: 'chasing the ball', w: 3, plan: () => [{ do: 'use', target: 'ball' }, { do: 'wait', s: 2 }] },
     { name: 'ringing the bell', w: 2, plan: () => [{ do: 'use', target: 'bell' }, { do: 'gesture', name: 'laugh' }] },
     { name: 'knocking on the glass', w: 3, plan: () => [{ do: 'routine', name: 'knock' }] },
     { name: 'dancing', w: 2, plan: () => [{ do: 'routine', name: 'dance' }] },
     { name: 'signalling', w: 1, plan: () => [{ do: 'morse', text: 'sos' }, { do: 'gesture', name: 'point' }] },
     { name: 'lights out', w: 1, plan: () => [{ do: 'use', target: 'switch' }, { do: 'use', target: 'rug' }, { do: 'use', target: 'switch' }] },
   ];
-  let lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER, lastBehavior = null;
+  let lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER, lastBehavior = null, thinkAt = 0;
+  const THINK_GAP = 1.2;                                 // s still between two thinking beats
   function behave(name) {                                 // also a headless test hook
     const b = BEHAVIORS.find(x => x.name === name) ?? BEHAVIORS[0];
     return run(b.plan(), b.name);
@@ -275,7 +312,12 @@ export function makeBrain(sim, rig, camera, props = null) {
     // 'saying' and 'error' are not states to live in: idle behaviors need 'idle'
     if (st.i < 0 && (st.status === 'saying' || st.status === 'error') && bClock - statusAt > C.STATUS_HOLD) setStatus('idle');
     maybeBehave();
+    // waiting on the model: the head cocks one way and the other, again after a pause. The plan
+    // that comes back replaces it (a gesture cut short eases out)
+    if (st.status === 'thinking' && st.i < 0 && bClock >= thinkAt && !sim.s.gesture && !sim.s.airborne
+        && sim.s.speed <= C.V_MOVE && sim.gesture('thinking')) thinkAt = bClock + GESTURES.thinking.dur + THINK_GAP;
     if (st.i < 0) return;
+    planAt = bClock;
     const a = st.plan[st.i];
     a.t += dt;
     if (a.t > TIMEOUT[a.do](a)) return fail(`${a.do} timed out (${st.i + 1}/${st.plan.length})`);
@@ -293,7 +335,7 @@ export function makeBrain(sim, rig, camera, props = null) {
 
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
-- {"do":"gesture","name":"..."} — yes (nod), no (sits up and wags a finger), shake (a quick cross shake of the whole body), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive (a slap on the glass), snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
+- {"do":"gesture","name":"..."} — yes (nod), no (sits up and wags a finger), shake (a quick cross shake of the whole body), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), peek (stand tall and look about), startle (a flinch), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive (a slap on the glass), snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
 - {"do":"walkTo","x":X,"z":Z,"speed":S} — walk to a WORLD position in your room (preferred for going places). "speed" (u/s): ~0.8 relaxed default, ~1.6 jog, ~3-3.4 FULL SPRINT — sprint when told to hurry/run/race or when excited.
 - {"do":"walk","forward":F,"right":R,"speed":S} — walk a relative offset in YOUR body frame (for "back up a bit", "come closer"); negative allowed. You end up facing your travel direction.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
@@ -435,7 +477,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke,
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, react,
     get idle() { return st.i < 0 && st.status === 'idle'; },
     behaviors: BEHAVIORS.map(b => b.name), routines: Object.keys(ROUTINES),
     get needsLocal() { return llmDown && local.supported && !local.ready; } };

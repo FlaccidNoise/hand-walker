@@ -144,6 +144,14 @@ const DEAD_ROLL = 3.0, DEAD_PITCH = 0.6, DEAD_LIFT = -1.05;   // on its back, le
 const FLARE = { yaw: 0, mcp: -0.3, pip: 0.55 };
 const THROW = { yaw: 0, mcp: -0.5, pip: 0.6 };   // a digit thrown high in the dance
 
+// periscope: up tall, look one way, hold, look the other, hold. (A slow 0.12 sway was 5 px.)
+// An idle, and what the hand does when the lights go out
+const PEEK = {
+  dur: 3.6,
+  body: { height: [[0, 0], [0.1, 0.08], [0.85, 0.08], [1, 0]], pitch: [[0, 0], [0.1, -0.25], [0.85, -0.25], [1, 0]],
+    roll: [[0, 0], [0.12, 0], [0.2, 0.28], [0.42, 0.28], [0.52, -0.28], [0.75, -0.28], [0.85, 0], [1, 0]] },
+};
+
 export const GESTURES = {
   // nod: a small wind-up, two dips of the stump, a hard stop. The body sinks with the pitch
   // or the planted digits cannot follow (osc(2, 0.16) with no sink moved the stump 7 px on
@@ -204,13 +212,13 @@ export const GESTURES = {
   // come here: the same level index, curled in twice
   beckon: { dur: 1.6, body: LEAN_IN, digits: { index: { base: LEVEL, win: [0.1, 0.8],
     pip: [[0, 0], [0.25, 0], [0.42, 0.8], [0.58, 0], [0.75, 0.8], [0.92, 0], [1, 0]] } } },
-  // hmm: the head cocks and stays cocked while the index taps the floor, slowly, twice
+  // hmm: the head cocks one way, holds, then the other: weighing it up. Body only, so the
+  // plan that follows starts with no digit to put down. (A cock with two floor taps moved
+  // the stump 2 px: the roll alone does not read, the rear-back with it does)
   thinking: {
     dur: 2.2,
-    body: { roll: [[0, 0], [0.1, 0.26], [0.85, 0.26], [1, 0]], pitch: [[0, 0], [0.1, -0.12], [0.85, -0.12], [1, 0]] },
-    digits: { index: { base: 'rest', win: [0.1, 0.95],
-      mcp: [[0, 0], [0.25, TAP_LIFT], [0.32, 0], [0.5, 0], [0.6, TAP_LIFT], [0.67, 0], [1, 0]] } },
-    cue: [0.32, 0.67].map(u => [0.1 + u * 0.85, 'tick']),
+    body: { pitch: [[0, 0], [0.1, -0.2], [0.85, -0.2], [1, 0]], height: [[0, 0], [0.1, 0.05], [0.85, 0.05], [1, 0]],
+      roll: [[0, 0], [0.1, 0.28], [0.42, 0.28], [0.52, -0.28], [0.85, -0.28], [1, 0]] },
   },
   // impatient: index drums the ground. base 'rest' + a lift offset: offset 0 IS the
   // tip on the floor, so every down-stroke strikes exactly, at any posture
@@ -309,6 +317,16 @@ export const GESTURES = {
     }])),
     cue: [[0.28, 'knock']],                    // the thud as it hits the floor
   },
+  peek: PEEK,
+  // a flinch: up and back in a tenth of a second, held, then down. (With a finger splay
+  // on top the thumb and pinky re-stepped: measured)
+  startle: { dur: 0.9, body: { height: [[0, 0], [0.12, 0.1], [0.7, 0.08], [1, 0]], pitch: [[0, 0], [0.12, -0.28], [0.7, -0.24], [1, 0]] } },
+  // jump: the brain plays `crouch`, springs from the bottom of it (0.16 s in: the rest of the
+  // track is never reached), and plays `land` at touchdown. The sim's own landing squash is
+  // 0.02 u. The crouch costs its own depth in apex: 2.32 u standing, 2.10 from -0.22, and
+  // the light switch needs 1.9. Hence -0.17
+  crouch: { dur: 0.4, body: { height: [[0, 0], [0.35, -0.17], [0.8, -0.17], [1, 0]], pitch: [[0, 0], [0.35, 0.12], [0.8, 0.12], [1, 0]] } },
+  land: { dur: 0.45, body: { height: [[0, 0], [0.2, -0.2], [0.55, 0.04], [1, 0]], pitch: [[0, 0], [0.2, 0.12], [0.6, -0.03], [1, 0]] } },
   morse: morseGesture('sos'),                // the brain's morse action swaps in the asked text
   // nap: settle low with the stump laid down level, lean over, and breathe slowly for the
   // whole hold — user-invokable ("take a nap") and the payoff of the 'nap' idle
@@ -357,10 +375,5 @@ export const IDLES = {
     body: { roll: [[0, 0], [0.08, 0.28], [0.8, 0.28], [0.88, 0], [1, 0]], pitch: [[0, 0], [0.08, -0.2], [0.8, -0.2], [0.88, 0], [1, 0]],
       height: [[0, 0], [0.08, 0.05], [0.8, 0.05], [0.88, 0], [1, 0]] },
   },
-  // periscope: up tall, look one way, hold, look the other, hold. (A slow 0.12 sway was 5 px.)
-  peek: {
-    w: 2, dur: 3.6,
-    body: { height: [[0, 0], [0.1, 0.08], [0.85, 0.08], [1, 0]], pitch: [[0, 0], [0.1, -0.25], [0.85, -0.25], [1, 0]],
-      roll: [[0, 0], [0.12, 0], [0.2, 0.28], [0.42, 0.28], [0.52, -0.28], [0.75, -0.28], [0.85, 0], [1, 0]] },
-  },
+  peek: { w: 2, ...PEEK },
 };

@@ -842,7 +842,7 @@ function makeSim(rig, calib) {
     s.airborne = true;
   }
 
-  const sim = { s, legs, step, reset, autoWalk, jump, bandAt, gesture, pivot, twitch: kick, onCue: null, onStep: null };
+  const sim = { s, legs, step, reset, autoWalk, jump, bandAt, gesture, pivot, onCue: null, onStep: null };
   return sim;
 }
 

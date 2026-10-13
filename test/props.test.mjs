@@ -52,3 +52,19 @@ test('a point on the piano strip maps to its key, and off the strip to none', as
   assert.equal(pianoKey(PIANO, xm, PIANO.z0 + PIANO.keyW * 8.01), -1);
   assert.equal(pianoKey(PIANO, PIANO.x1 + 0.01, PIANO.z0 + 0.2), -1);
 });
+
+test('ball: a hard hit on a wall is reported, a crawl into it is not', () => {
+  const far = { x: -4, y: 1.4, z: 0, vx: 0, vz: 0, airborne: false };
+  const b = { x: 4.9, z: 0, r: 0.32, vx: 2, vz: 0 };
+  let hits = 0;
+  for (let i = 0; i < 100; i++) if (stepBall(b, 0.01, far)) hits++;
+  assert.equal(hits, 1, 'one bounce, one report');
+  const slow = { x: 5.05, z: 0, r: 0.32, vx: 0.2, vz: 0 };
+  let quiet = 0;
+  for (let i = 0; i < 100; i++) if (stepBall(slow, 0.01, far)) quiet++;
+  assert.equal(quiet, 0);
+  const pinned = { x: 5.0, z: 0, r: 0.32, vx: 0, vz: 0 };     // the hand walks it into the wall
+  let pressed = 0;
+  for (let i = 0; i < 50; i++) if (stepBall(pinned, 0.01, { ...far, x: 4.7, vx: 1.8 })) pressed++;
+  assert.equal(pressed, 0, 'pressed against the wall is not a bounce');
+});

@@ -170,3 +170,41 @@ test('a sign made while already facing the viewer starts at once', () => {
   m.step(0.1);
   assert.deepEqual(m.calls.map(c => c[0]), ['gesture']);
 });
+
+test('a reaction is ignored by a hand with no plan, and joins a plan right after the current action', () => {
+  const m = mock();
+  m.step(3);
+  assert.equal(m.brain.react('bell'), false, 'nothing running, nothing recent: the QA gate lives here');
+  assert.equal(m.brain.st.i, -1);
+  m.brain.command([{ do: 'wait', s: 1 }, { do: 'gesture', name: 'laugh' }], { source: 'click' });
+  m.step(0.05);
+  assert.equal(m.brain.react('bell'), true);
+  assert.deepEqual(m.brain.st.plan.map(a => a.name ?? a.do), ['wait', 'startle', 'laugh']);
+  assert.equal(m.brain.react('bell'), false, 'the same event again while its reaction waits: no pile-up');
+});
+
+test('a reaction just after a plan ends runs on its own, and any input replaces it', () => {
+  const m = mock();
+  m.brain.command([{ do: 'wait', s: 0.1 }], { source: 'click' });
+  m.step(0.5);
+  assert.equal(m.brain.st.i, -1);
+  assert.equal(m.brain.react('lightsOff'), true);
+  assert.deepEqual(m.brain.st.plan.map(a => a.name ?? a.do), ['wait', 'peek']);
+  assert.equal(m.brain.command([{ do: 'jump' }], { source: 'voice' }), true);
+  assert.equal(m.brain.react('nonsense'), false);
+});
+
+test('while the model is asked, the hand thinks; a rules command does not wait', async () => {
+  const m = mock();
+  globalThis.fetch = () => new Promise(() => {});           // a model that never answers
+  m.brain.ask('is it tea time?');                           // a question: it goes to the model
+  m.step(0.1);
+  assert.deepEqual(m.calls.filter(c => c[0] === 'gesture').map(c => c[1]), ['thinking']);
+  m.step(4);
+  assert.equal(m.calls.filter(c => c[1] === 'thinking').length, 2, 'and again after a pause');
+  delete globalThis.fetch;
+  const n = mock();
+  n.brain.ask('jump');
+  n.step(0.1);
+  assert.ok(!n.calls.some(c => c[1] === 'thinking'));
+});
