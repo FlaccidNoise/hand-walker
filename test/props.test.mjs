@@ -1,7 +1,7 @@
 // test/props.test.mjs — pure prop logic (src/props.js). Pure node.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stepBall, bellRings, switchFlips } from '../src/props.js';
+import { stepBall, bellRings, switchFlips, kickBall, KICK_MAX } from '../src/props.js';
 import * as C from '../src/tuning.js';
 
 const hand = (o = {}) => ({ x: 0, y: 1.4, z: 0, vx: 0, vz: 0, airborne: false, ...o });
@@ -67,4 +67,16 @@ test('ball: a hard hit on a wall is reported, a crawl into it is not', () => {
   let pressed = 0;
   for (let i = 0; i < 50; i++) if (stepBall(pinned, 0.01, { ...far, x: 4.7, vx: 1.8 })) pressed++;
   assert.equal(pressed, 0, 'pressed against the wall is not a bounce');
+});
+
+test('a thrown ball takes the throw, capped, and still stops in the room', () => {
+  const b = { x: 0, z: 0, r: 0.32, vx: 0, vz: 0 };
+  kickBall(b, 1, -2);
+  assert.deepEqual([b.vx, b.vz], [1, -2]);
+  kickBall(b, 30, 40);
+  assert.ok(Math.abs(Math.hypot(b.vx, b.vz) - KICK_MAX) < 1e-9, 'capped');
+  assert.ok(Math.abs(b.vx / b.vz - 0.75) < 1e-9, 'same direction');
+  for (let i = 0; i < 3000; i++) stepBall(b, 0.01, hand({ x: -40 }));
+  assert.equal(Math.hypot(b.vx, b.vz), 0);
+  assert.ok(Math.abs(b.x) <= C.ROOM.wall && Math.abs(b.z) <= C.ROOM.wall);
 });

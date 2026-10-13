@@ -263,6 +263,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (ok) pokes = (pokes + 1) % POKES.length;          // a poke that was outranked did not happen
     return ok;
   }
+  const soothe = () => { pokes = 0; pokedAt = -1e9; };    // petted: the pokes are forgiven
 
   // ---- idle behaviors: compound plans when the USER goes quiet. Tracks its own
   // user-inactivity clock — the sim's lastInput is useless here because the
@@ -491,7 +492,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, react, mute: (m) => { muted = m; },
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, soothe, react, mute: (m) => { muted = m; },
     get idle() { return st.i < 0 && st.status === 'idle'; },
     behaviors: BEHAVIORS.map(b => b.name), routines: Object.keys(ROUTINES),
     get needsLocal() { return llmDown && local.supported && !local.ready; } };

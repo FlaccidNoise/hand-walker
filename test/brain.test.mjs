@@ -324,3 +324,11 @@ test('while the model is asked, the hand thinks; a rules command does not wait',
   n.step(0.1);
   assert.ok(!n.calls.some(c => c[1] === 'thinking'));
 });
+
+test('a pet forgives the pokes', () => {
+  const m = mock();
+  m.brain.poke(); m.step(0.6); m.brain.poke(); m.step(0.6);
+  m.brain.soothe();
+  m.brain.poke();
+  assert.equal(m.brain.st.plan.find(a => a.do === 'gesture').name, 'laugh', 'the first poke again');
+});

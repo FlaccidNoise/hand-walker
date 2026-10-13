@@ -83,7 +83,7 @@ async function init() {
   };
   window.__hand = __hand;
 
-  const input = initInput({ renderer, camera, controls, scene, rig, brain, props, ui });
+  const input = initInput({ renderer, camera, view, controls, scene, rig, brain, props, ui });
 
   // dev keys (movement, emotes and clicks live in src/input.js, page keys in src/ui.js)
   if (DEV) addEventListener('keydown', (e) => {
