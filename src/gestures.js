@@ -56,7 +56,11 @@ function osc(cycles, amp, env) {
 const dips = (n, a, u0, u1) => [[0, 0],
   ...Array.from({ length: 2 * n + 1 }, (_, i) => [u0 + (u1 - u0) * i / (2 * n), i % 2 ? a : 0]), [1, 0]];
 
-const TAP_LIFT = -0.35;                      // rad of MCP extension that lifts a tapping digit off its rest
+const TAP_LIFT = -0.35;
+// lean in and level the palm, so an index at full extension reaches level (point, beckon)
+const LEAN_IN = { pitch: [[0, 0], [0.12, -0.06], [0.28, 0.24], [0.75, 0.24], [1, 0]],
+  height: [[0, 0], [0.12, 0.03], [0.28, -0.13], [0.75, -0.13], [1, 0]] };
+const LEVEL = { yaw: 0, mcp: -0.55, pip: 0.5 };                      // rad of MCP extension that lifts a tapping digit off its rest
 const CURL = { yaw: 0, mcp: 0, pip: 0.5 };   // lifted part-curled base (the "no" point)
 const WAVE_CURL = { yaw: 0, mcp: -0.25, pip: 0.65 };
 const WAVE_BOB = osc(2, 0.3);
@@ -76,6 +80,7 @@ const hoverDigits = (extended, pose = CURL, thumb = FIST) => Object.fromEntries(
     [f, { base: [extended].flat().includes(f) ? pose : f === 'thumb' ? thumb : FIST, win: HOVER_WIN }]));
 // the on-edge presentation every sign shares: lift, roll thumb-up, hold, roll back, set down
 const SIGN_ROLL = [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]];
+const LEVEL_PALM = [[0, 0], [0.22, 0.6], [0.55, 0.6], [0.7, 0], [1, 0]];   // cancels the standing posture for the hold
 const sign = (extended, thumb = THUMB_TUCK) => ({
   dur: 1.8, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL }, digits: hoverDigits(extended, CURL, thumb),
 });
@@ -119,6 +124,7 @@ export function morseGesture(text) {
 }
 // a level envelope for loops that should hold their size (osc's default fades in and out)
 const HOLD = [[0, 0], [0.07, 1], [0.93, 1], [1, 0]];
+const KNOCKS = [0.3, 0.47, 0.64].map(u => 0.05 + u * 0.87), KNOCK_REAR = -0.18;   // gesture u of each rap
 const DANCE_BEATS = 8;
 const DEAD_ROLL = 3.0, DEAD_PITCH = 0.6, DEAD_LIFT = -1.05;   // on its back, level, wrist near the floor
 const FLARE = { yaw: 0, mcp: -0.3, pip: 0.55 };
@@ -137,13 +143,15 @@ export const GESTURES = {
   no:  { dur: 1.3, digits: { index: { base: CURL, yaw: osc(3, 0.28) } } },
   // shrug: snappy rise+pitch-back (fast rise, slow settle), splayed fingers, thumb
   // flares out and re-plants during the settle
+  // (rear-back holds on planted digits to pitch -0.3 with height +0.08: scanned)
   idk: {
-    dur: 1.1,
+    dur: 1.3,
     body: {
-      pitch:  [[0, 0], [0.22, -0.15], [0.5, -0.12], [1, 0]],
-      height: [[0, 0], [0.2, 0.1], [0.5, 0.08], [1, 0]],
+      pitch:  [[0, 0], [0.15, -0.26], [0.6, -0.22], [1, 0]],
+      height: [[0, 0], [0.15, 0.08], [0.6, 0.07], [1, 0]],
+      roll:   [[0, 0], [0.15, 0.12], [0.6, 0.1], [1, 0]],
     },
-    splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.22, 0.14], [0.55, 0.12], [1, 0]] },
+    splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.15, 0.14], [0.6, 0.12], [1, 0]] },
     digits: { thumb: { base: { yaw: 0, mcp: -0.3, pip: 0.55 }, win: [0, 0.75] } },
   },
   // hello: fingers lift and bob in a ripple (index→pinky), each re-planting via a
@@ -167,33 +175,24 @@ export const GESTURES = {
   bow: {
     dur: 1.6,
     body: {
-      pitch:  [[0, 0], [0.3, 0.28], [0.65, 0.28], [1, 0]],
-      height: [[0, 0], [0.3, -0.18], [0.65, -0.18], [1, 0]],
+      pitch:  [[0, 0], [0.1, -0.05], [0.3, 0.28], [0.65, 0.28], [1, 0]],
+      height: [[0, 0], [0.1, 0.03], [0.3, -0.18], [0.65, -0.18], [1, 0]],
     },
   },
   // point: lean in and level the palm so the index can reach level. The MCP stops at
   // -0.55 and the palm stands 34° nose-down: on the standing posture an index at
   // mcp -0.35 still pointed 30° into the floor (measured). 0 re-steps
-  point: {
-    dur: 1.6,
-    body: { pitch: [[0, 0], [0.12, -0.06], [0.28, 0.24], [0.75, 0.24], [1, 0]],
-      height: [[0, 0], [0.12, 0.03], [0.28, -0.13], [0.75, -0.13], [1, 0]] },
-    digits: { index: { base: { yaw: 0, mcp: -0.55, pip: 0.5 }, win: [0.1, 0.8] } },
-  },
-  // come here: index curls twice
-  beckon: {
-    dur: 1.4,
-    digits: { index: { base: { yaw: 0, mcp: -0.3, pip: 0.6 },
-      pip: [[0, 0], [0.2, 0.55], [0.4, -0.05], [0.6, 0.55], [0.8, -0.05], [1, 0]] } },
-  },
-  // hmm: slow rear + side tilt while the index taps the air
+  point: { dur: 1.6, body: LEAN_IN, digits: { index: { base: LEVEL, win: [0.1, 0.8] } } },
+  // come here: the same level index, curled in twice
+  beckon: { dur: 1.6, body: LEAN_IN, digits: { index: { base: LEVEL, win: [0.1, 0.8],
+    pip: [[0, 0], [0.25, 0], [0.42, 0.8], [0.58, 0], [0.75, 0.8], [0.92, 0], [1, 0]] } } },
+  // hmm: the head cocks and stays cocked while the index taps the floor, slowly, twice
   thinking: {
-    dur: 2.0,
-    body: {
-      pitch: [[0, 0], [0.25, -0.07], [0.8, -0.05], [1, 0]],
-      roll:  [[0, 0], [0.25, 0.08], [0.8, 0.06], [1, 0]],
-    },
-    digits: { index: { base: { yaw: 0, mcp: -0.3, pip: 0.7 }, pip: osc(3, 0.18), win: [0.05, 0.9] } },
+    dur: 2.2,
+    body: { roll: [[0, 0], [0.1, 0.26], [0.85, 0.26], [1, 0]], pitch: [[0, 0], [0.1, -0.12], [0.85, -0.12], [1, 0]] },
+    digits: { index: { base: 'rest', win: [0.1, 0.95],
+      mcp: [[0, 0], [0.25, TAP_LIFT], [0.32, 0], [0.5, 0], [0.6, TAP_LIFT], [0.67, 0], [1, 0]] } },
+    cue: [0.32, 0.67].map(u => [0.1 + u * 0.85, 'tick']),
   },
   // impatient: index drums the ground. base 'rest' + a lift offset: offset 0 IS the
   // tip on the floor, so every down-stroke strikes exactly, at any posture
@@ -211,7 +210,7 @@ export const GESTURES = {
   thumbsUp: {
     dur: 1.8, hover: true, face: true,
     body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -2.6], [0.55, -2.6], [0.7, 0], [1, 0]],
-      pitch: [[0, 0], [0.22, 0.6], [0.55, 0.6], [0.7, 0], [1, 0]] },
+      pitch: LEVEL_PALM },
     digits: hoverDigits('thumb'),
   },
   // the thumb points DOWN: the wrist must ride a thumb-length higher than the other
@@ -236,24 +235,30 @@ export const GESTURES = {
   fingerGun: sign(['index', 'thumb'], CURL),
   highFive: sign(['thumb', 'index', 'middle', 'ring', 'pinky']),
   // whip keys are in the digit window's own 0..1 (HOVER_WIN = 0.7 of the gesture)
-  snap: { dur: 1.4, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
-    digits: snapDigits([0.62]), cue: [[0.62 * 0.7, 'snap']] },
+  // (the roll leaves at u 0.55: the last click lands before 0.47 so the pose holds a beat after it)
+  snap: { dur: 1.4, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL, pitch: LEVEL_PALM },
+    digits: snapDigits([0.6]), cue: [[0.6 * 0.7, 'snap']] },
   // two snaps: Thing's remote. The second one works the light switch from anywhere.
-  doubleSnap: { dur: 1.8, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
-    digits: snapDigits([0.5, 0.78]), cue: [[0.5 * 0.7, 'snap'], [0.78 * 0.7, 'snap'], [0.78 * 0.7, 'remote']] },
+  doubleSnap: { dur: 1.8, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL, pitch: LEVEL_PALM },
+    digits: snapDigits([0.42, 0.66]), cue: [[0.42 * 0.7, 'snap'], [0.66 * 0.7, 'snap'], [0.66 * 0.7, 'remote']] },
   // rap on the glass: the index cocks back and knocks three times. The knock sound and
   // a camera shake land on each strike (cues, played by main.js)
+  // The whole hand pecks with each rap: the index alone moved a few pixels (filmed)
   knock: {
     dur: 1.7,
-    body: { pitch: [[0, 0], [0.15, -0.1], [0.85, -0.1], [1, 0]], height: [[0, 0], [0.15, 0.06], [0.85, 0.06], [1, 0]] },
+    body: { pitch: [[0, 0], [0.15, KNOCK_REAR], ...KNOCKS.flatMap(u => [[u - 0.06, KNOCK_REAR], [u, 0.16], [u + 0.06, KNOCK_REAR]]), [0.85, KNOCK_REAR], [1, 0]],
+      height: [[0, 0], [0.15, 0.05], ...KNOCKS.flatMap(u => [[u - 0.06, 0.05], [u, -0.08], [u + 0.06, 0.05]]), [0.85, 0.05], [1, 0]] },
     digits: { index: { base: { yaw: 0, mcp: -0.5, pip: 0.85 }, win: [0.05, 0.92],
       mcp: [0.3, 0.47, 0.64].flatMap(u => [[u - 0.07, 0], [u, 0.4], [u + 0.07, 0]]) } },
-    cue: [0.3, 0.47, 0.64].map(u => [0.05 + u * 0.87, 'knock']),
+    cue: KNOCKS.map(u => [u, 'knock']),
   },
   // dance: bounce on the beat, sway, and throw one digit after another. The beat is cues.
   dance: {
     dur: 0.6 * DANCE_BEATS,
-    body: { height: osc(DANCE_BEATS, 0.1, HOLD), roll: osc(DANCE_BEATS / 2, 0.16, HOLD), pitch: osc(DANCE_BEATS / 4, 0.09, HOLD) },
+    // the bounce digs deeper and the stump dips at the end of each four: an accent
+    body: { height: osc(DANCE_BEATS, 0.1, HOLD).map(([u, v], k) => k === 15 || k === 27 ? [u, -0.17] : [u, v]),
+      roll: osc(DANCE_BEATS / 2, 0.16, HOLD),
+      pitch: [[0, 0], [0.125, 0.09], [0.25, 0], [0.375, -0.09], [0.44, 0], [0.469, 0.2], [0.5, 0], [0.625, 0.09], [0.75, 0], [0.81, 0], [0.844, 0.2], [0.875, -0.09], [1, 0]] },
     digits: {
       index:  { base: THROW, pip: osc(2, 0.35), win: [0.04, 0.28] },
       pinky:  { base: THROW, pip: osc(2, 0.35), win: [0.27, 0.51] },
@@ -268,9 +273,11 @@ export const GESTURES = {
   playDead: {
     dur: 6, hover: true,
     body: {
-      lift:  [[0, 0], [0.07, 0.5], [0.2, 0.5], [0.27, DEAD_LIFT], [0.5, DEAD_LIFT], [0.57, 0.5], [0.85, 0.5], [1, 0]],
-      roll:  [[0, 0], [0.07, 0], [0.2, DEAD_ROLL], [0.57, DEAD_ROLL], [0.68, 0], [1, 0]],
-      pitch: [[0, 0], [0.07, 0], [0.2, DEAD_PITCH], [0.57, DEAD_PITCH], [0.68, 0], [1, 0]],
+      lift:  [[0, 0], [0.07, 0.5], [0.22, 0.5], [0.28, DEAD_LIFT], [0.5, DEAD_LIFT], [0.57, 0.5], [0.85, 0.5], [1, 0]],
+      // it reels once at the top of the lift, then goes over. (A reel during the lift put the
+      // thumb through the floor: 0.51 u in one step)
+      roll:  [[0, 0], [0.07, 0], [0.1, 0.3], [0.13, -0.2], [0.22, DEAD_ROLL], [0.57, DEAD_ROLL], [0.68, 0], [1, 0]],
+      pitch: [[0, 0], [0.13, 0], [0.22, DEAD_PITCH], [0.57, DEAD_PITCH], [0.68, 0], [1, 0]],
     },
     digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map((f, i) => [f, {
       base: { yaw: 0, mcp: 0.45, pip: 1.0 }, win: HOVER_WIN,
@@ -278,6 +285,7 @@ export const GESTURES = {
       pip: f === 'middle' ? [[0, -0.5], [0.4, -0.5], [0.5, 0], [0.62, 0], [0.65, -0.45], [0.69, 0], [1, 0]]
         : [[0, -0.5], [0.36 + 0.03 * i, -0.5], [0.46 + 0.03 * i, 0], [1, 0]],
     }])),
+    cue: [[0.28, 'knock']],                    // the thud as it hits the floor
   },
   morse: morseGesture('sos'),                // the brain's morse action swaps in the asked text
   // nap: settle low with the stump laid down level, lean over, and breathe slowly for the
@@ -303,7 +311,6 @@ export const GESTURES = {
 // input (see step()); same format, w = pick weight
 const DRUM_BASE = 'rest';
 const DRUM_STROKE = [[0, 0], [0.3, TAP_LIFT], [0.55, 0], [0.7, 0], [1, 0]];
-const STRETCH = { yaw: 0, mcp: -0.35, pip: 0.5 };
 export const IDLES = {
   // (breathe and shift are gone: 2 px and under 1 px on screen. Stillness is the idle.)
   // one digit up at a time: with the windows overlapped only two stayed planted (measured)
@@ -315,23 +322,23 @@ export const IDLES = {
       ring:   { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.6, 0.9] },
     },
   },
-  // cat stretch: all four fingers extend forward while the body rears slightly
+  // cat stretch: up onto the fingertips, slowly, and down again. (Four fingers lifted at once
+  // left it standing on the thumb: measured 1 planted.) The one slow idle
   stretch: {
     w: 2, dur: 2.8,
-    body: { pitch: [[0, 0], [0.3, -0.07], [0.7, -0.06], [1, 0]] },
-    digits: {
-      index:  { base: STRETCH, win: [0.05, 0.9] }, middle: { base: STRETCH, win: [0.08, 0.92] },
-      ring:   { base: STRETCH, win: [0.08, 0.92] }, pinky:  { base: STRETCH, win: [0.05, 0.9] },
-    },
+    body: { pitch: [[0, 0], [0.35, -0.3], [0.65, -0.3], [1, 0]], height: [[0, 0], [0.35, 0.08], [0.65, 0.08], [1, 0]] },
+    splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.35, 0.12], [0.65, 0.12], [1, 0]] },
   },
-  // periscope peek: rise up and sway slowly side to side, looking around
+  // the head cocks, holds, and snaps back: still, then a twitch
+  cock: {
+    w: 3, dur: 2.2,
+    body: { roll: [[0, 0], [0.08, 0.28], [0.8, 0.28], [0.88, 0], [1, 0]], pitch: [[0, 0], [0.08, -0.2], [0.8, -0.2], [0.88, 0], [1, 0]],
+      height: [[0, 0], [0.08, 0.05], [0.8, 0.05], [0.88, 0], [1, 0]] },
+  },
+  // periscope: up tall, look one way, hold, look the other, hold. (A slow 0.12 sway was 5 px.)
   peek: {
     w: 2, dur: 3.6,
-    body: { height: [[0, 0], [0.2, 0.07], [0.8, 0.07], [1, 0]], roll: osc(1, 0.12) },
-  },
-  // idle scritch: index scratches the floor absently
-  scratch: {
-    w: 1, dur: 2.2,
-    digits: { index: { base: { yaw: 0, mcp: -0.05, pip: 1.05 }, mcp: osc(5, 0.12), win: [0.1, 0.9] } },
+    body: { height: [[0, 0], [0.1, 0.08], [0.85, 0.08], [1, 0]], pitch: [[0, 0], [0.1, -0.25], [0.85, -0.25], [1, 0]],
+      roll: [[0, 0], [0.12, 0], [0.2, 0.28], [0.42, 0.28], [0.52, -0.28], [0.75, -0.28], [0.85, 0], [1, 0]] },
   },
 };
