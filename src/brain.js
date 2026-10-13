@@ -115,7 +115,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     face(a) {                                            // turn to a WORLD heading (props have a front),
       if (!a.started) {                                  // or to the viewer, from where the hand stands then
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;
-        const d = M.wrapAngle((a.viewer ? toViewer() : a.heading) - sim.s.heading);
+        const d = M.wrapAngle((a.viewer ? toViewer() + (a.off ?? 0) : a.heading) - sim.s.heading);
         if (Math.abs(d) < (a.within ?? 0.06)) return DONE;
         if (sim.pivot(d * 180 / Math.PI)) a.started = true;
         return RUNNING;
@@ -179,7 +179,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
     // a sign is made AT someone (`face` in its def): turn to the viewer first, unless nearly there
     if (camera) plan = plan.flatMap(a => a.do === 'gesture' && GESTURES[a.name]?.face
-      ? [{ do: 'face', viewer: true, within: FACE_WITHIN }, a] : [a]);
+      ? [{ do: 'face', viewer: true, off: GESTURES[a.name].face === true ? 0 : GESTURES[a.name].face, within: FACE_WITHIN }, a] : [a]);
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
     st.i = 0;
@@ -293,7 +293,7 @@ export function makeBrain(sim, rig, camera, props = null) {
 
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
-- {"do":"gesture","name":"..."} — yes (nod), no (index wag), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive, snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
+- {"do":"gesture","name":"..."} — yes (nod), no (sits up and wags a finger), shake (a quick cross shake of the whole body), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive (a slap on the glass), snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
 - {"do":"walkTo","x":X,"z":Z,"speed":S} — walk to a WORLD position in your room (preferred for going places). "speed" (u/s): ~0.8 relaxed default, ~1.6 jog, ~3-3.4 FULL SPRINT — sprint when told to hurry/run/race or when excited.
 - {"do":"walk","forward":F,"right":R,"speed":S} — walk a relative offset in YOUR body frame (for "back up a bit", "come closer"); negative allowed. You end up facing your travel direction.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"

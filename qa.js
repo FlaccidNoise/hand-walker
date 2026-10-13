@@ -286,7 +286,7 @@ const SCENARIOS = {
   async gestureCut(H) {
     const tips = () => F.map(f => H.rig.digits[f].tip.getWorldPosition(new H.THREE.Vector3()));
     const rest = tips(), bad = [];
-    for (const [name, ms] of [['bow', 600], ['wave', 500], ['dance', 1300], ['tap', 400], ['sleep', 1500], ['knock', 700], ['laugh', 300], ['idk', 300]]) {
+    for (const [name, ms] of [['bow', 600], ['point', 500], ['dance', 1300], ['tap', 400], ['sleep', 1500], ['knock', 700], ['laugh', 300], ['idk', 300]]) {
       if (!H.gesture(name)) bad.push(`${name} refused over a stance gesture`);
       await sleep(ms);
     }

@@ -15,7 +15,8 @@
 // locks at ±90°, roll is the last axis and doesn't. So TOTAL body pitch (the -0.6 posture
 // plus the track) stays within ±1.2 rad, and anything bigger goes on `roll`. The perch
 // peaks at +1.1 rad total (63°, measured on mount.rotation.z). heading always stays 0 (below).
-// `face: true` = a sign made AT someone: the brain turns the hand to the viewer first.
+// `face` = a sign made AT someone: the brain turns the hand to the viewer first (true), or
+// to that many rad off the viewer (a sign that reads in profile).
 //
 // Authoring rules (refuted approaches — do not rediscover):
 // - NO body heading track, ever: ±0.25 rad heading with world-pinned feet drives
@@ -56,18 +57,13 @@ function osc(cycles, amp, env) {
 const dips = (n, a, u0, u1) => [[0, 0],
   ...Array.from({ length: 2 * n + 1 }, (_, i) => [u0 + (u1 - u0) * i / (2 * n), i % 2 ? a : 0]), [1, 0]];
 
-const TAP_LIFT = -0.35;
+const TAP_LIFT = -0.35;                      // rad of MCP extension that lifts a tapping digit off its rest
 // lean in and level the palm, so an index at full extension reaches level (point, beckon)
 const LEAN_IN = { pitch: [[0, 0], [0.12, -0.06], [0.28, 0.24], [0.75, 0.24], [1, 0]],
   height: [[0, 0], [0.12, 0.03], [0.28, -0.13], [0.75, -0.13], [1, 0]] };
-const LEVEL = { yaw: 0, mcp: -0.55, pip: 0.5 };                      // rad of MCP extension that lifts a tapping digit off its rest
+const LEVEL = { yaw: 0, mcp: -0.55, pip: 0.5 };
 const CURL = { yaw: 0, mcp: 0, pip: 0.5 };   // lifted part-curled base (the "no" point)
-const WAVE_CURL = { yaw: 0, mcp: -0.25, pip: 0.65 };
-const WAVE_BOB = osc(2, 0.3);
 const FIST = { yaw: 0, mcp: 1.3, pip: 1.6 };  // tight curl for the 4 non-extended hover digits
-// thumb folded across the fist. FIST on the thumb drives its CMC 1.3 rad toward the
-// floor: level at stance height it speared the ground and snapped 0.73 u on exit
-const THUMB_TUCK = { yaw: 0, mcp: 0.25, pip: 1.4 };
 // hover set-down: every hover digit closes its window at HOVER_WIN[1] (roll must be back
 // to 0 by then), opens to the stance pose in the air over HOVER_UNFURL of the gesture,
 // and only THEN does the lift lower the hand onto its fingertips (lift holds to 0.85).
@@ -78,12 +74,30 @@ const HOVER_LIFT = [[0, 0], [0.15, 0.45], [0.85, 0.45], [1, 0]];
 const hoverDigits = (extended, pose = CURL, thumb = FIST) => Object.fromEntries(
   ['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
     [f, { base: [extended].flat().includes(f) ? pose : f === 'thumb' ? thumb : FIST, win: HOVER_WIN }]));
-// the on-edge presentation every sign shares: lift, roll thumb-up, hold, roll back, set down
+// the on-edge presentation: lift, roll thumb-up, hold, roll back, set down
 const SIGN_ROLL = [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]];
+const THUMB_UP = [[0, 0], [0.22, -2.6], [0.55, -2.6], [0.7, 0], [1, 0]];   // past the edge: at -1.4 the thumb aims at the viewer
 const LEVEL_PALM = [[0, 0], [0.22, 0.6], [0.55, 0.6], [0.7, 0], [1, 0]];   // cancels the standing posture for the hold
-const sign = (extended, thumb = THUMB_TUCK) => ({
-  dur: 1.8, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL }, digits: hoverDigits(extended, CURL, thumb),
-});
+// the perch: rock back onto the stump, palm to the front, fingers free to talk (the films'
+// "sit back on the stump"). Standing, every digit points at the floor: the MCP stops at
+// -0.55 and the palm is 34° nose-down, so signs made there aimed at the ground (filmed).
+// The wrist only ever goes down on the way in: a lift first read as levitation.
+// PERCH_LIFT puts the stump 0.02 u off the floor (lowest mesh vertex, measured: -0.85
+// floated at 0.23). Total pitch peaks at -0.6 + 1.7 = 1.1 rad.
+const PERCH_PITCH = 1.7, PERCH_LIFT = -1.06;
+// the thumb folded under the fist: of eight poses filmed this shows least. (yaw -0.6 with
+// mcp 0.9 snapped 0.19 u on the way out; this one holds at 0.12)
+const FIST_THUMB = { yaw: -0.6, mcp: 1.3, pip: 1.6 };
+const UP = { yaw: 0, mcp: -0.1, pip: 0.5 };          // a finger held up out of the fist
+// seated from u = a to b; up and level again by 0.7, when the digits open. On the way out
+// it rises BEFORE it levels: levelling low drove a fisted thumb into the floor (0.40 u in a step)
+const perch = (a, b, hold = []) => ({
+  lift:  [[0, 0], [a, PERCH_LIFT], [b, PERCH_LIFT], [0.64, 0.45], [0.85, 0.45], [1, 0]],
+  pitch: [[0, 0], [a * 0.8, PERCH_PITCH], ...hold, [0.58, PERCH_PITCH], [0.7, 0], [1, 0]] });
+const perchSign = (extended, pose = () => UP) => ({
+  dur: 2.2, hover: true, face: true, body: perch(0.24, 0.54),
+  digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
+    [f, { base: extended.includes(f) ? pose(f) : f === 'thumb' ? FIST_THUMB : FIST, win: HOVER_WIN }])) });
 // finger snap: thumb and middle meet, the middle whips into the palm, and the sound
 // lands on that frame (`cue` = [gesture u, name], played by main.js). There is no
 // finger-to-thumb contact solver: timing and the click sell it.
@@ -140,7 +154,14 @@ export const GESTURES = {
   // cross: the whole hand shakes itself. Roll holds on planted digits to 0.3 rad (scanned);
   // at 0.22 the twist did not read from the app camera
   shake: { dur: 0.9, body: { roll: [[0, 0], [0.15, 0.28], [0.4, -0.28], [0.65, 0.28], [0.85, 0], [1, 0]] } },
-  no:  { dur: 1.3, digits: { index: { base: CURL, yaw: osc(3, 0.28) } } },
+  // no: up on the stump, a fist, and the index wags. (Standing, the wag was hidden behind
+  // the middle finger: filmed.) Wag keys are in the digit window's own 0..1
+  no: (() => {
+    const g = perchSign(['index']);
+    g.dur = 2.4;
+    g.digits.index.yaw = [[0.36, 0], [0.45, 0.32], [0.54, -0.32], [0.63, 0.32], [0.72, -0.32], [0.79, 0]];
+    return g;
+  })(),
   // shrug: snappy rise+pitch-back (fast rise, slow settle), splayed fingers, thumb
   // flares out and re-plants during the settle
   // (rear-back holds on planted digits to pitch -0.3 with height +0.08: scanned)
@@ -154,16 +175,13 @@ export const GESTURES = {
     splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.15, 0.14], [0.6, 0.12], [1, 0]] },
     digits: { thumb: { base: { yaw: 0, mcp: -0.3, pip: 0.55 }, win: [0, 0.75] } },
   },
-  // hello: fingers lift and bob in a ripple (index→pinky), each re-planting via a
-  // real swing as its window closes
+  // hello: up on the stump, open palm, and the hand twists side to side (roll turns it
+  // about the finger axis there). The old ripple curled the fingers DOWN and stood on the
+  // thumb alone: measured 1 planted
   wave: {
-    dur: 1.6,
-    digits: {
-      index:  { base: WAVE_CURL, pip: WAVE_BOB, win: [0, 0.4] },
-      middle: { base: WAVE_CURL, pip: WAVE_BOB, win: [0.15, 0.55] },
-      ring:   { base: WAVE_CURL, pip: WAVE_BOB, win: [0.3, 0.7] },
-      pinky:  { base: WAVE_CURL, pip: WAVE_BOB, win: [0.45, 0.85] },
-    },
+    dur: 2.6, hover: true, face: true,
+    body: { ...perch(0.22, 0.54), roll: [[0.22, 0], [0.27, 0.45], [0.33, -0.45], [0.39, 0.45], [0.45, -0.45], [0.51, 0.3], [0.56, 0], [1, 0]] },
+    digits: hoverDigits(['thumb', 'index', 'middle', 'ring', 'pinky'], CURL),
   },
   // chuckle: five dips with a sway under them (a 0.05 sine bounce was 5 px on screen).
   // Measured: 0 re-steps, 5 planted
@@ -209,8 +227,7 @@ export const GESTURES = {
   // at roll -1.4 on the standing posture the thumb pointed at the viewer, never up (filmed)
   thumbsUp: {
     dur: 1.8, hover: true, face: true,
-    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -2.6], [0.55, -2.6], [0.7, 0], [1, 0]],
-      pitch: LEVEL_PALM },
+    body: { lift: HOVER_LIFT, roll: THUMB_UP, pitch: LEVEL_PALM },
     digits: hoverDigits('thumb'),
   },
   // the thumb points DOWN: the wrist must ride a thumb-length higher than the other
@@ -222,18 +239,23 @@ export const GESTURES = {
       roll: [[0, 0], [0.12, 0], [0.3, 1.4], [0.55, 1.4], [0.7, 0], [1, 0]] },
     digits: hoverDigits('thumb'),
   },
-  // middle finger extended, same roll thumbsUp/Down use (pitch was tried first —
-  // rejected in-sim, the whole hand read as bunched to one side instead of a clean
-  // one-finger-up silhouette; roll reads cleanly since it already works for thumb)
-  flipBird: {
-    dur: 1.8, hover: true, face: true,
-    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]] },
-    digits: hoverDigits('middle', CURL, THUMB_TUCK),
+  flipBird: perchSign(['middle']),
+  // a V: the index and middle splay apart (the other signs of yaw cross them: filmed)
+  peace: perchSign(['index', 'middle'], f => ({ ...UP, yaw: f === 'index' ? -0.2 : 0.2 })),
+  horns: perchSign(['index', 'pinky']),
+  // on edge, palm level, index out and thumb up, shown side-on. It fires once: the muzzle kicks
+  fingerGun: {
+    dur: 2.0, hover: true, face: 0.9, cue: [[0.4, 'snap']],
+    body: { lift: HOVER_LIFT, roll: THUMB_UP,
+      pitch: [[0, 0], [0.22, 0.6], [0.39, 0.6], [0.42, 0.95], [0.5, 0.6], [0.55, 0.6], [0.7, 0], [1, 0]] },
+    digits: hoverDigits(['index', 'thumb'], CURL, CURL),
   },
-  peace: sign(['index', 'middle']),
-  horns: sign(['index', 'pinky']),
-  fingerGun: sign(['index', 'thumb'], CURL),
-  highFive: sign(['thumb', 'index', 'middle', 'ring', 'pinky']),
+  // up on the stump, palm out, and one slap on the glass (the knock cue shakes the view)
+  highFive: {
+    dur: 2.4, hover: true, face: true, cue: [[0.4, 'knock']],
+    body: perch(0.24, 0.54, [[0.34, PERCH_PITCH], [0.4, PERCH_PITCH - 0.4], [0.47, PERCH_PITCH]]),
+    digits: hoverDigits(['thumb', 'index', 'middle', 'ring', 'pinky'], CURL),
+  },
   // whip keys are in the digit window's own 0..1 (HOVER_WIN = 0.7 of the gesture)
   // (the roll leaves at u 0.55: the last click lands before 0.47 so the pose holds a beat after it)
   snap: { dur: 1.4, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL, pitch: LEVEL_PALM },
