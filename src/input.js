@@ -245,6 +245,7 @@ export function initInput({ renderer, camera, view, controls, scene, rig, brain,
   };
   cv.addEventListener('pointerup', lift);
   cv.addEventListener('pointercancel', lift);
+  addEventListener('blur', () => { down.clear(); pinch = lead = press = null; });   // a lift the page never saw must not leave a finger down
 
   const held = new Set();
   let keyT = 0, driving = false, acting = null;
