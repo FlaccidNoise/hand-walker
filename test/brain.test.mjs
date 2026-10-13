@@ -152,3 +152,46 @@ test('a gesture the sim cannot start yet is tried again, and an unknown one fail
   m.step(0.05);
   assert.match(m.brain.st.detail, /unknown gesture "moonwalk"/);
 });
+
+test('a gesture that replaces a walk stops the walk first', () => {
+  const m = mock();
+  m.brain.command([{ do: 'walkTo', x: 4, z: 0, speed: 1.8 }], { source: 'click' });
+  m.step(0.5);
+  m.brain.command([{ do: 'gesture', name: 'wave' }], { source: 'key' });
+  assert.deepEqual(m.calls.at(-1), ['walk', 0, 0], 'the walk command is zeroed at once');
+  m.step(0.1);
+  assert.deepEqual(m.calls.at(-1), ['gesture', 'wave']);
+  assert.ok(m.pos.x < 1.2, `stayed put: x=${m.pos.x}`);
+});
+
+test('a walk that replaces a walk is not zeroed in between', () => {
+  const m = mock();
+  m.brain.command([{ do: 'walkTo', x: 4, z: 0 }], { source: 'key' });
+  m.step(0.2);
+  const n = m.calls.length;
+  m.brain.command([{ do: 'walkTo', x: 4, z: 1 }], { source: 'key' });
+  assert.equal(m.calls.length, n, 'no stop between two carrots');
+});
+
+test('a turn the sim cannot start yet is tried again', () => {
+  const m = mock();
+  let busy = true;
+  const pivot = m.sim.pivot;
+  m.sim.pivot = (deg) => busy ? false : pivot(deg);
+  m.brain.command([{ do: 'turn', deg: 45 }], { source: 'key' });
+  m.step(0.3);
+  assert.equal(m.brain.st.status, 'acting', 'still waiting, not an error');
+  busy = false; m.step(0.05);
+  assert.deepEqual(m.calls.at(-1), ['pivot', 45]);
+});
+
+test('a poke that is outranked does not count', () => {
+  const m = mock();
+  m.brain.command([{ do: 'walkTo', x: 4, z: 0 }], { source: 'key' });
+  m.step(0.1);
+  assert.equal(m.brain.poke(), false);
+  assert.equal(m.brain.poke(), false);
+  m.brain.cancel();
+  assert.equal(m.brain.poke(), true);
+  assert.equal(m.brain.st.plan[0].name, 'laugh');
+});

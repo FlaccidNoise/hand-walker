@@ -70,19 +70,21 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
   });
 
   const held = new Set();
-  let keyT = 0, driving = false;
+  let keyT = 0, driving = false, acting = null;
+  // a key action (jump, turn, emote): a held direction waits for it instead of replacing it
+  const act = (plan) => { if (brain.command(plan, { source: 'key' })) acting = brain.st.plan; };
   const typing = (e) => e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
   addEventListener('keydown', (e) => {
     if (typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
     if (DIRS[e.code]) { e.preventDefault(); held.add(e.code); keyT = KEY_REFRESH; return; }
     if (e.repeat) return;
-    if (e.code === 'Space') { e.preventDefault(); brain.command([{ do: 'jump' }], { source: 'key' }); }
-    else if (e.code === 'KeyQ') brain.command([{ do: 'turn', deg: 45 }], { source: 'key' });
-    else if (e.code === 'KeyE') brain.command([{ do: 'turn', deg: -45 }], { source: 'key' });
-    else if (/^Digit\d$/.test(e.code)) {
-      const name = EMOTE_KEYS[(+e.code.slice(5) + 9) % 10];   // 1..9 then 0
-      brain.command([{ do: 'gesture', name }], { source: 'key' });
+    if (e.code === 'Space') {
+      if (e.target.tagName === 'BUTTON') return;              // Space presses a focused button
+      e.preventDefault(); act([{ do: 'jump' }]);
     }
+    else if (e.code === 'KeyQ') act([{ do: 'turn', deg: 45 }]);
+    else if (e.code === 'KeyE') act([{ do: 'turn', deg: -45 }]);
+    else if (/^Digit\d$/.test(e.code)) act([{ do: 'gesture', name: EMOTE_KEYS[(+e.code.slice(5) + 9) % 10] }]);   // 1..9 then 0
   });
   addEventListener('keyup', (e) => held.delete(e.code));
   addEventListener('blur', () => held.clear());
@@ -115,10 +117,12 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
     notice(dt);
     let dx = 0, dz = 0;
     for (const k of held) { dx += DIRS[k][0]; dz += DIRS[k][1]; }
+    if (acting && !(brain.st.plan === acting && brain.st.i >= 0)) acting = null;
     if (!dx && !dz) {
-      if (driving) { driving = false; brain.cancel(); }       // release = stop
+      if (driving) { driving = false; if (!acting) brain.cancel(); }   // release = stop
       return;
     }
+    if (acting) return;
     if ((keyT += dt) < KEY_REFRESH) return;
     keyT = 0; driving = true;
     camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();        // screen-up on the floor

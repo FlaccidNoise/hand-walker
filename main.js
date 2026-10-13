@@ -57,7 +57,7 @@ async function init() {
   sim.onCue = (name) => {
     if (name === 'remote') props.fire('switch');
     else if (SOUNDS[name]) SOUNDS[name]();
-    if (name === 'knock') shake = 1;
+    if (name === 'knock' && !matchMedia('(prefers-reduced-motion: reduce)').matches) shake = 1;
   };
   sim.onStep = (f, foot) => props.footfall(f, foot.x, foot.z, sim.s.speed);
   // sound starts with the first key or pointer press (browsers refuse it before that)
@@ -85,7 +85,7 @@ async function init() {
   // dev keys (movement, emotes and clicks live in src/input.js)
   addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
+    if (DEV && k === '`') { state.debug = !state.debug; dbg.visible = state.debug; controls.enabled = state.debug; }
     if (k === 'm' && e.target.tagName !== 'INPUT') setMute(!audio.muted);
     if (DEV && k === 'p') state.paused = !state.paused;
     if (DEV && k === 'r') { brain.stop(); sim.reset(); }

@@ -125,7 +125,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     turn(a) {                                            // pivot-in-place, zero translation
       if (!a.started) {
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
-        if (!sim.pivot(a.deg ?? 90)) throw 'pivot refused (busy)';
+        if (!sim.pivot(a.deg ?? 90)) return RUNNING;       // a gesture or a pivot is finishing: try again
         a.started = true; return RUNNING;
       }
       return sim.s.pivotTarget != null ? RUNNING : DONE;
@@ -138,7 +138,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     morse: (a) => (morseGesture(a.text ?? 'sos')?.dur ?? 4) + 4,
     walk: (a) => 8 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // includes a lead-in pivot
     walkTo: (a) => a.tmo ?? 30,
-    turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20,
+    turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20 + 8,       // +8: it may wait out a hover, like gesture
     face: () => 8,
   };
 
@@ -177,6 +177,9 @@ export function makeBrain(sim, rig, camera, props = null) {
     });
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
+    // a walk the new plan does not continue must stop: the next action waits for a
+    // standing hand, and nothing else would zero the sim's walk command
+    if (st.i >= 0 && !/^walk/.test(plan[0].do)) sim.autoWalk(0, 0);
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
     st.i = 0;
     st.tag = tag;                                        // idle behaviors show 'idling', not 'acting'
@@ -211,7 +214,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (bClock - pokedAt > C.POKE_FORGET) pokes = 0;
     pokedAt = bClock;
     const ok = command(POKES[pokes], { source: 'click' });
-    pokes = (pokes + 1) % POKES.length;
+    if (ok) pokes = (pokes + 1) % POKES.length;          // a poke that was outranked did not happen
     return ok;
   }
 

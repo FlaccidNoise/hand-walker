@@ -31,7 +31,10 @@ try {
     const h = window.__hand, out = [], pump = (s) => { for (let i = 0, n = Math.round(s * 120 / h.C.TIME_SCALE); i < n; i++) window.__vframe(1000 / 120); };
     const plans = [...h.brain.behaviors.map(name => ({ name, start: () => h.brain.behave(name) })),
       ...h.brain.routines.map(name => ({ name: `routine ${name}`, start: () => h.brain.command([{ do: 'routine', name }], { source: 'click' }) })),
-      ...[0, 1, 2, 3, 4].map(i => ({ name: `poke ${i + 1}`, keep: i > 0, start: () => h.brain.poke() }))];
+      ...[0, 1, 2, 3, 4].map(i => ({ name: `poke ${i + 1}`, keep: i > 0, start: () => h.brain.poke() })),
+      // a key or a poke that lands mid-walk: the walk must stop, not carry the hand out of the room
+      ...[['key', () => h.brain.command([{ do: 'gesture', name: 'wave' }], { source: 'key' })], ['poke', () => h.brain.poke()], ['jump', () => h.brain.command([{ do: 'jump' }], { source: 'key' })]]
+        .map(([n, then]) => ({ name: `walk, then ${n}`, start: () => { h.brain.command([{ do: 'walkTo', x: -3, z: 2, speed: 1.8 }], { source: 'click' }); pump(1.2); return then(); } }))];
     for (const p of plans) {
       if (!p.keep) { h.reset(); pump(1); }
       const t0 = h.sim.s.time;
@@ -39,6 +42,8 @@ try {
       while (!err && h.brain.st.i >= 0 && h.sim.s.time - t0 < LIMIT) { pump(0.25); if (h.brain.st.status === 'error') err = h.brain.st.detail; }
       if (!err && h.brain.st.status === 'error') err = h.brain.st.detail;
       if (!err && h.brain.st.i >= 0) err = `still running after ${LIMIT} s (${h.brain.st.detail})`;
+      const B = h.rig.mount.position, out0 = Math.max(Math.abs(B.x), Math.abs(B.z)) - h.C.ROOM.half;
+      if (!err && out0 > 0.3) err = `ended ${out0.toFixed(1)} u outside the room`;
       out.push({ name: p.name, s: +(h.sim.s.time - t0).toFixed(1), err });
     }
     return out;
