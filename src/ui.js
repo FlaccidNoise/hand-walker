@@ -69,9 +69,9 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   const hear = () => {
     const running = unlockAudio();
     $('soundTip').hidden = true; label();
-    if (running) for (const t of EARS) removeEventListener(t, hear);
+    if (running) for (const t of EARS) removeEventListener(t, hear, true);
   };
-  for (const t of EARS) addEventListener(t, hear);
+  for (const t of EARS) addEventListener(t, hear, true);       // capture: typing in the box counts too
   const label = () => {
     muteBtn.classList.toggle('off', audio.muted);
     muteBtn.setAttribute('aria-pressed', String(!audio.muted));
