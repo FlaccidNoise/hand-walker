@@ -64,12 +64,11 @@ async function main() {
     page.on('pageerror', e => errs.push(String(e)));
     await page.goto(url, { waitUntil: 'load' });
 
+    await page.waitForFunction('window.__hand && window.__hand.state.ready', { timeout: 15000 });
     if (opts.run) {
       await page.evaluate(opts.run);
     }
     await new Promise(r => setTimeout(r, opts.wait));
-
-    await page.waitForFunction('window.__hand && window.__hand.state.ready', { timeout: 15000 });
 
     const saved = [];
     for (const view of views) {
@@ -82,7 +81,8 @@ async function main() {
       if (pos) {
         for (let i = 0; i < 10; i++) {
           await page.evaluate((p) => {
-            const { camera, controls } = window.__hand;
+            const { camera, controls, view } = window.__hand;
+            view.hold = true;                                // the app's follow camera stands down
             camera.position.set(p.camX, p.camY, p.camZ);
             controls.target.set(p.tgtX, p.tgtY, p.tgtZ);
             controls.update();
