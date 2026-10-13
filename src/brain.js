@@ -40,8 +40,10 @@ export function makeBrain(sim, rig, camera, props = null) {
   const ROOM = C.ROOM.half;
   const clampRoom = (p) => ({ x: M.clamp(p.x, -ROOM, ROOM), z: M.clamp(p.z, -ROOM, ROOM) });
   let statusAt = 0;                                      // bClock when the status last changed
+  let asking = false;                                    // a question is out with a model (not: the model is downloading)
   const setStatus = (status, detail = '') => {
     st.status = status; st.detail = detail; statusAt = bClock;
+    if (status !== 'thinking') asking = false;
     if (st.onstatus) st.onstatus(st);
   };
   const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; setStatus('error', msg); };
@@ -314,7 +316,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     maybeBehave();
     // waiting on the model: the head cocks one way and the other, again after a pause. The plan
     // that comes back replaces it (a gesture cut short eases out)
-    if (st.status === 'thinking' && st.i < 0 && bClock >= thinkAt && !sim.s.gesture && !sim.s.airborne
+    if (asking && st.i < 0 && bClock >= thinkAt && !sim.s.gesture && !sim.s.airborne
         && sim.s.speed <= C.V_MOVE && sim.gesture('thinking')) thinkAt = bClock + GESTURES.thinking.dur + THINK_GAP;
     if (st.i < 0) return;
     planAt = bClock;
@@ -383,7 +385,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     catch (e) { setStatus('error', `in-browser brain: ${e.message || e}`); return false; }
   }
   async function askLocal(text, gen, rules) {
-    setStatus('thinking', text);
+    setStatus('thinking', text); asking = true;
     let plan = null;
     try {
       plan = isQuestion(text) ? [{ do: 'gesture', name: await local.answer(text) }]
@@ -404,7 +406,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
     const rules = parseRules(text, body.position);
     if (rules && !isQuestion(text)) return obey(rules);
     if (llmDown) return local.ready ? askLocal(text, gen, rules) : obey(rules, true);
-    setStatus('thinking', text);
+    setStatus('thinking', text); asking = true;
     history.push({ role: 'user', parts: [{ text: `${stateLine()} ${text}` }] });
     while (history.length > 12) history.shift();
     let reply;
