@@ -11,6 +11,9 @@
 //   towed     any leg dragged planted at err>0.15 for >0.5s none
 //   clear     worst swing peak / carried-digit clearance (u)   >= 0.10
 //   touchdown tip travel in the landing sim step (u)           <= 0.035
+//   tipJump   largest tip move in one sim step, on the ground  <= 0.15 (hopScuttle, at 120 Hz).
+//             A swing step runs to 0.07. A digit towed out of reach and thrown by the
+//             ground constraint moved 0.32
 // KNOWN_RED scenarios are allowed to fail (named, with the reason); every other one
 // must pass. The gate runs on a virtual clock, so results are bit-reproducible.
 
@@ -28,6 +31,9 @@ const SLIDE = { pivot180: 2.0 };
 const SLIDE_PER_U = { clickWalk: 0.15 };
 // pivot steps hold their fold longer for lane clearance and land faster than travel steps (0.033-0.044)
 const TOUCH = { pivot180: 0.05, turnCycle: 0.05, clickWalk: 0.05 };
+// no digit snaps on the ground. Judged where a frame is one sim step (the 120 Hz gate): at
+// 60 Hz a frame is two steps and the recorder cannot see inside it
+const TIP_JUMP = { hopScuttle: 0.15 };
 
 // under the gate's virtual clock (scripts/qa-gate.mjs) waiting PUMPS frames, so a
 // scenario integrates an exact frame time and is bit-reproducible at any machine load
@@ -67,7 +73,7 @@ function makeRecorder(H) {
   const L = {
     yMin: Infinity, yMax: -Infinity, plantedMin: Infinity, dist: 0,
     px: rig.mount.position.x, pz: rig.mount.position.z, cmdOn: false, tStop: null, tMove: null,
-    touchdown: 0, aloftClear: Infinity, t0: sim.s.time, tipStep: 0, gap: Infinity,
+    touchdown: 0, aloftClear: Infinity, t0: sim.s.time, tipStep: 0, tipJump: 0, gap: Infinity,
     d: Object.fromEntries(F.map(f => [f, { mode: null, prev: null, from: null, peak: 0, clear: Infinity, steps: 0, len: 0, aloftT: 0 }])),
   };
   const tick = () => {
@@ -131,6 +137,7 @@ function makeRecorder(H) {
       const moved = q.prev ? Math.hypot(tip.x - q.prev.x, tip.z - q.prev.z) : 0;
       const step3 = q.prev ? Math.hypot(moved, tip.y - q.prev.y) / nSteps : 0;
       if (step3 > L.tipStep) { L.tipStep = step3; L.stepWho = `${f} ${leg.mode} t=${(sim.s.time - L.t0).toFixed(2)}`; }
+      if (!sim.s.airborne && leg.mode !== 'tuck' && step3 > L.tipJump) { L.tipJump = step3; L.jumpWho = `${f} ${leg.mode} t=${(sim.s.time - L.t0).toFixed(2)}`; L.jumpSteps = nSteps; }
       if (moved > 5e-4 * nSteps) L.tMove = sim.s.time;      // 0.04 mm a step: below this the tip is still
       if (leg.mode === 'swing') {
         if (q.mode !== 'swing') { q.from = { x: tip.x, z: tip.z }; q.peak = -Infinity; }
@@ -198,6 +205,7 @@ function makeRecorder(H) {
         gap: +L.gap.toFixed(3), gapWho: L.gapWho,
         touchdown: +L.touchdown.toFixed(4),
         tipStep: +L.tipStep.toFixed(3),                     // largest 3D tip move in one sim step
+        tipJump: +L.tipJump.toFixed(3), jumpWho: L.jumpWho, // the same, feet on the ground only
         bodyBob: +(L.yMax - L.yMin).toFixed(3),
         stopSettle: L.tStop != null && L.tMove != null ? +Math.max(L.tMove - L.tStop, 0).toFixed(3) : null,
         dist: +L.dist.toFixed(2),
@@ -211,6 +219,7 @@ function makeRecorder(H) {
         if (m.slidePerU > (SLIDE_PER_U[name] ?? CRIT.slidePerU)) fails.push(`slide/u ${m.slidePerU}`);
       } else if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
       if (G && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
+      if (TIP_JUMP[name] && L.jumpSteps === 1 && m.tipJump > TIP_JUMP[name]) fails.push(`tip jump ${m.tipJump} (${L.jumpWho})`);
       if (m.touchdown > (TOUCH[name] ?? CRIT.touchdown)) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
       if (name === 'stop' && m.stopSettle > CRIT.stopSettle) fails.push(`settle ${m.stopSettle}s`);
       if (name === 'pivot180') {
@@ -319,11 +328,24 @@ const SCENARIOS = {
     let berr = null;                                         // a brain error arrives through onsay
     const page = H.brain.st.onsay;
     H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
-    H.brain.run([{ do: 'walkTo', x: 3, z: 0, speed: 0.8 }, { do: 'walkTo', x: 3, z: -3, speed: 0.8 },
-      { do: 'walkTo', x: 0, z: -3, speed: 0.8 }, { do: 'walkTo', x: 0, z: 0, speed: 0.8 }]);
+    // (x stops at 2.4: at 3 the second corner stood inside Thing's box, and the brain now
+    // ends a walk clear of it, which bent the square)
+    H.brain.run([{ do: 'walkTo', x: 2.4, z: 0, speed: 0.8 }, { do: 'walkTo', x: 2.4, z: -3, speed: 0.8 },
+      { do: 'walkTo', x: -0.6, z: -3, speed: 0.8 }, { do: 'walkTo', x: -0.6, z: 0, speed: 0.8 }]);
     for (let i = 0; i < 400 && H.brain.st.i >= 0; i++) await sleep(100);
     H.brain.st.onsay = page;
     if (berr) throw new Error('clickWalk: brain ' + berr);
+  },
+  // a hop-turn straight into a scuttle (go and ring the bell, from rest): the first strides
+  // of a trot. A digit held down past its reach by the support guard was thrown 0.32 u
+  async hopScuttle(H) {
+    let berr = null;
+    const page = H.brain.st.onsay;
+    H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
+    H.brain.run([{ do: 'walkTo', x: -3.2, z: 3.2, speed: 1.8 }]);
+    for (let i = 0; i < 100 && H.brain.st.i >= 0; i++) await sleep(100);
+    H.brain.st.onsay = page;
+    if (berr) throw new Error('hopScuttle: brain ' + berr);
   },
   // walk, stop, hold: the hand must halt fast, finish IN its stance, and then be still
   async stop(H) {
@@ -346,7 +368,7 @@ const SCENARIOS = {
 };
 // scenario → why it may fail. Filled from the first deterministic run; shrink it, never grow it casually.
 const KNOWN_RED = {
-  spam: 'seeded chaos: a new direction every 160 ms. Timing-sensitive (green at 120 Hz, red at 90)',
+  spam: 'seeded chaos: a new direction every 160 ms. Timing-sensitive: middle and ring pads overlap (gap 0.02) at 120 Hz, green at 60',
   jumpRun: 'ring and pinky pads overlap (gap 0.27) on the first strides after a running jump lands',
 };
 

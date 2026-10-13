@@ -98,6 +98,28 @@ const perchSign = (extended, pose = () => UP) => ({
   dur: 2.2, hover: true, face: true, body: perch(0.24, 0.54),
   digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
     [f, { base: extended.includes(f) ? pose(f) : f === 'thumb' ? FIST_THUMB : FIST, win: HOVER_WIN }])) });
+// rock, paper, scissors: up on the stump as a fist, three pumps of the fist (a hat on
+// each), and on four the sign. RPS_THROW is the gesture u of the throw: the brain takes
+// the visitor's pick until then. A digit that opens holds the fist until the throw (keys
+// in the digit window's own 0..1: 1.3 rad opens in 0.19 s at RATE_CARRY)
+export const RPS_DUR = 4.0, RPS_THROW = 0.42;
+const RPS_BEATS = [0.21, 0.28, 0.35];
+const rps = (open, pose = () => CURL) => {
+  const tw = RPS_THROW / HOVER_WIN[1], until = (v) => [[0, v], [tw, v], [tw + 0.07, 0], [1, 0]];
+  return {
+    dur: RPS_DUR, hover: true, face: true, cue: [...RPS_BEATS.map(u => [u, 'hat']), [RPS_THROW, 'snap']],
+    body: { pitch: perch(0.15, 0.54).pitch,
+      lift: [[0, 0], [0.15, PERCH_LIFT], ...[...RPS_BEATS, RPS_THROW].flatMap(u => [[u - 0.035, PERCH_LIFT + 0.16], [u, PERCH_LIFT]]),
+        [0.54, PERCH_LIFT], [0.64, 0.45], [0.85, 0.45], [1, 0]] },
+    digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f => {
+      if (!open.includes(f)) return [f, { base: f === 'thumb' ? FIST_THUMB : FIST, win: HOVER_WIN }];
+      // (a thumb that will open waits across the fist, not under it: from under, the
+      // floor threw its tip 0.75 u at the throw)
+      const to = pose(f), from = f === 'thumb' ? { yaw: 0, mcp: 0.9, pip: 1.2 } : FIST;
+      return [f, { base: to, win: HOVER_WIN, yaw: until(from.yaw - to.yaw), mcp: until(from.mcp - to.mcp), pip: until(from.pip - to.pip) }];
+    })),
+  };
+};
 // finger snap: thumb and middle meet, the middle whips into the palm, and the sound
 // lands on that frame (`cue` = [gesture u, name], played by main.js). There is no
 // finger-to-thumb contact solver: timing and the click sell it.
@@ -151,6 +173,25 @@ const PEEK = {
   body: { height: [[0, 0], [0.1, 0.08], [0.85, 0.08], [1, 0]], pitch: [[0, 0], [0.1, -0.25], [0.85, -0.25], [1, 0]],
     roll: [[0, 0], [0.12, 0], [0.2, 0.28], [0.42, 0.28], [0.52, -0.28], [0.75, -0.28], [0.85, 0], [1, 0]] },
 };
+
+// cat stretch: up onto the fingertips, slowly, and down again. (Four fingers lifted at once
+// left it standing on the thumb: measured 1 planted.) An idle, and how it leaves its box
+const STRETCH = {
+  dur: 2.8,
+  body: { pitch: [[0, 0], [0.35, -0.3], [0.65, -0.3], [1, 0]], height: [[0, 0], [0.35, 0.08], [0.65, 0.08], [1, 0]] },
+  splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.35, 0.12], [0.65, 0.12], [1, 0]] },
+};
+// lying on its side, pinky edge down, fingers loosely curled: how a hand rests. Measured:
+// - flat on the palm with the fingers curled under, the ring was thrown 1.4 u getting up
+// - straight down while rolling threw the pinky 1.28 u: a 0.2 u hop first, and the fingers
+//   curl only once it is over (LATE, in the digit window's own 0..1)
+// - rolled to -1.7 at lift -0.92 the lowest vertex sits on the floor and the highest at 0.99.
+//   It lies 0.95 u to one side of the wrist and 0.23 to the other, 1.51 ahead (measured)
+// - the thumb folds under the fist: left out, it stuck 1.19 u out to the side
+const LIE_LIFT = -0.92, LIE_ROLL = -1.7, LIE = { yaw: 0, mcp: 0.7, pip: 1.0 };
+const late = (v) => [[0, -v], [0.2, -v], [0.32, 0], [1, 0]];
+const lieDigits = (win) => Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
+  [f, { base: f === 'thumb' ? FIST_THUMB : LIE, win, mcp: late(f === 'thumb' ? 1.3 : 0.7), pip: late(0.5) }]));
 
 export const GESTURES = {
   // nod: a small wind-up, two dips of the stump, a hard stop. The body sinks with the pitch
@@ -319,6 +360,28 @@ export const GESTURES = {
     cue: [[0.28, 'knock']],                    // the thud as it hits the floor
   },
   peek: PEEK,
+  rpsRock: rps([]),
+  rpsPaper: rps(['thumb', 'index', 'middle', 'ring', 'pinky']),
+  rpsScissors: rps(['index', 'middle'], f => ({ ...UP, yaw: f === 'index' ? -0.2 : 0.2 })),
+  stretch: STRETCH,
+  // into the box: lie down on its side (seated by u 0.22, up from 0.6). The brain shuts the
+  // box at 1.1 s and hides the hand at 1.8 s, so the getting-up is never seen
+  nestle: {
+    dur: 3.6, hover: true,
+    body: { lift: [[0, 0], [0.06, 0.2], [0.22, LIE_LIFT], [0.6, LIE_LIFT], [0.68, 0.45], [0.9, 0.45], [1, 0]],
+      pitch: [[0, 0], [0.18, 0.6], [0.64, 0.6], [0.74, 0], [1, 0]], roll: [[0, 0], [0.04, 0], [0.2, LIE_ROLL], [0.64, LIE_ROLL], [0.74, 0], [1, 0]] },
+    digits: lieDigits([0, 0.74]),
+  },
+  // out of the box: sit up on the stump with the fingers curled (they show under the lid
+  // as it lifts a crack, at 1.2 s), then the lid goes back (2.0 s) and the fingers open.
+  // The front of the box drops at 2.8 s, before the fingers come down onto it
+  emerge: {
+    dur: 4.6, hover: true,
+    body: { ...perch(0.12, 0.56), roll: [[0.47, 0], [0.5, 0.35], [0.53, -0.35], [0.56, 0], [1, 0]] },
+    // (the thumb stays open: curled with the fingers it struck the floor sitting down, 0.31 u in a step)
+    digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f => [f, f === 'thumb' ? { base: CURL, win: HOVER_WIN }
+      : { base: CURL, win: HOVER_WIN, mcp: [[0, 0.5], [0.6, 0.5], [0.69, 0], [1, 0]], pip: [[0, 0.6], [0.6, 0.6], [0.69, 0], [1, 0]] }])),
+  },
   // a flinch: up and back in a tenth of a second, held, then down. (With a finger splay
   // on top the thumb and pinky re-stepped: measured)
   startle: { dur: 0.9, body: { height: [[0, 0], [0.12, 0.1], [0.7, 0.08], [1, 0]], pitch: [[0, 0], [0.12, -0.28], [0.7, -0.24], [1, 0]] } },
@@ -363,13 +426,7 @@ export const IDLES = {
       ring:   { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.6, 0.9] },
     },
   },
-  // cat stretch: up onto the fingertips, slowly, and down again. (Four fingers lifted at once
-  // left it standing on the thumb: measured 1 planted.) The one slow idle
-  stretch: {
-    w: 2, dur: 2.8,
-    body: { pitch: [[0, 0], [0.35, -0.3], [0.65, -0.3], [1, 0]], height: [[0, 0], [0.35, 0.08], [0.65, 0.08], [1, 0]] },
-    splay: { fingers: ['index', 'pinky'], track: [[0, 0], [0.35, 0.12], [0.65, 0.12], [1, 0]] },
-  },
+  stretch: { w: 2, ...STRETCH },
   // the head cocks, holds, and snaps back: still, then a twitch
   cock: {
     w: 3, dur: 2.2,

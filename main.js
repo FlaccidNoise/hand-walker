@@ -723,7 +723,12 @@ function makeSim(rig, calib) {
       const cyc = s.phase + gd.offsets[f];
       const p = cyc % 1, id = Math.floor(cyc);
       if (leg.mode === 'stance' && s.f > 0 && p >= dutyOf(f) && leg.cycleId !== id) {
-        if (mayLift()) { leg.cycleId = id; startSwing(f); down--; }
+        // a digit towed out of reach is not support: the gait-settle floor does not hold
+        // it down. (Held, the middle finger trailed 0.25 u behind its band on the first
+        // strides of a trot, and the ground constraint threw its tip 0.32 u in one step)
+        if (mayLift() || (leg.err > 4 * C.BAND_TIP_ERR && s.pivotTarget == null && down - 1 >= C.MIN_PLANTED[s.gait])) {
+          leg.cycleId = id; startSwing(f); down--;
+        }
       } else if (leg.mode === 'stance' && s.f > 0 && leg.cycleId !== id) {
         // band-exit rescue (§4.6): a foot dragged past the band bottom, swept out of
         // its lane by rotation, or unreachable can't wait for its phase slot

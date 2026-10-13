@@ -1,7 +1,7 @@
 // test/props.test.mjs — pure prop logic (src/props.js). Pure node.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stepBall, bellRings, switchFlips } from '../src/props.js';
+import { stepBall, bellRings, switchFlips, BOX, inBox } from '../src/props.js';
 import * as C from '../src/tuning.js';
 
 const hand = (o = {}) => ({ x: 0, y: 1.4, z: 0, vx: 0, vz: 0, airborne: false, ...o });
@@ -67,4 +67,27 @@ test('ball: a hard hit on a wall is reported, a crawl into it is not', () => {
   let pressed = 0;
   for (let i = 0; i < 50; i++) if (stepBall(pinned, 0.01, { ...far, x: 4.7, vx: 1.8 })) pressed++;
   assert.equal(pressed, 0, 'pressed against the wall is not a bounce');
+});
+
+test('ball: a ball left by a wall rolls back to where the hand can reach it', () => {
+  const far = { x: 0, y: 1.4, z: 0, vx: 0, vz: 0, airborne: false };
+  const b = { x: C.ROOM.wall - 0.5, z: -(C.ROOM.wall - 0.5), r: 0.32, vx: 0, vz: 0 };
+  for (let i = 0; i < 3000; i++) stepBall(b, 0.01, far);
+  assert.equal(Math.hypot(b.vx, b.vz), 0, 'and comes to rest');
+  const gap = Math.hypot(Math.max(0, Math.abs(b.x) - C.ROOM.half), Math.max(0, Math.abs(b.z) - C.ROOM.half));
+  assert.ok(gap < b.r + 0.6, `rests ${gap.toFixed(2)} u from the hand's nearest stand`);
+});
+
+test('ball: it bounces off the box and never comes to rest inside it', () => {
+  const far = { x: -3, y: 1.4, z: 3, vx: 0, vz: 0, airborne: false };
+  const b = { x: BOX.x, z: BOX.z1 + 1.5, r: 0.32, vx: 0, vz: -3 };            // straight at the front
+  for (let i = 0; i < 400; i++) { stepBall(b, 0.01, far, [BOX]); assert.ok(!inBox(b.x, b.z), `inside the box at step ${i}`); }
+  assert.ok(b.z > BOX.z1, 'it came back off the front');
+});
+
+test('box: the hand fits (extents measured on the mesh), and its lane is inside the walk clamp', () => {
+  const lane = C.ROOM.half;
+  assert.ok(lane - 0.6 > BOX.x0 && lane + 0.75 < BOX.x1, 'walking in');
+  assert.ok(lane - 0.23 > BOX.x0 && lane + 0.95 < BOX.x1, 'lying on its side');
+  assert.ok(BOX.h > 0.99 + 0.1 && BOX.x1 < C.ROOM.wall && BOX.z0 > -C.ROOM.wall);
 });

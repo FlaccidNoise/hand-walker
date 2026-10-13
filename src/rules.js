@@ -7,7 +7,7 @@ import * as C from './tuning.js';
 // room spots and screen directions (the camera is fixed, so these never move)
 const SPOTS = [
   [/\b(cent(er|re)|middle of the room)\b/, { x: 0, z: 0 }],
-  [/\b(step|box|block)\b/, { x: 0, z: 2.4 }],
+  [/\b(step|block|book)\b/, { x: 0, z: 2.4 }],
   [/\b(corner|bed)\b/, { x: -4, z: -4 }],
   [/\b(door|doorway)\b/, { x: 0, z: -4.2 }],
   [/\b(come here|come back|come closer|over here|to me|front)\b/, { x: 3.5, z: 3.5 }],
@@ -43,6 +43,11 @@ function clause(t, pos) {
     const text = t.replace(/\b(say|spell|tap|out|in|morse|code|for|please|me|something|it)\b/g, '').replace(/[^a-z0-9]/g, '');
     return [{ do: 'morse', text: text.slice(0, 8) || 'sos' }];
   }
+  if (/\b(rock,? paper,? scissors|rps|roshambo)\b/.test(t)) return [{ do: 'rps' }];
+  const pick = /^\s*(?:i (?:pick|choose|play|throw) )?(rock|paper|scissors)\s*$/.exec(t);
+  if (pick) return [{ do: 'rps', pick: pick[1] }];
+  if (/\bcome out\b/.test(t)) return [{ do: 'routine', name: 'out' }];
+  if (/\b(home|box)\b/.test(t)) return [{ do: 'routine', name: 'home' }];
   if (/\b(play dead|drop dead|die|bang)\b/.test(t)) return [{ do: 'gesture', name: 'playDead' }];
   if (/\b(dance|boogie|party|groove)\b/.test(t)) return [{ do: 'routine', name: 'dance' }];
   if (/\b(knock|get my attention)\b/.test(t)) return [{ do: 'routine', name: 'knock' }];
@@ -73,6 +78,7 @@ function clause(t, pos) {
 }
 
 export function parseRules(text, pos = { x: 0, z: 0 }) {
+  text = text.replace(/rock,\s*paper,\s*scissors/i, 'rock paper scissors');   // one game, not three clauses
   const parts = ` ${text.toLowerCase().replace(/[.!?]+/g, ' ')} `.split(/\b(?:and then|then|after that|and)\b|,/).map(s => s.trim()).filter(Boolean);
   const plan = [];
   for (const p of parts) {

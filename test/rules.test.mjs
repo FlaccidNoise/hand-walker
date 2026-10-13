@@ -67,6 +67,20 @@ test('morse, routines, the piano and playing dead', () => {
   assert.equal(one('tap').name, 'tap', 'a bare tap is still the impatient drum');
 });
 
+test('rock, paper, scissors: the game by name, and a sign on its own is a pick', () => {
+  for (const t of ['rock paper scissors', 'Rock, paper, scissors!', "let's play rps"]) assert.deepEqual(parseRules(t), [{ do: 'rps' }], t);
+  assert.deepEqual(parseRules('paper'), [{ do: 'rps', pick: 'paper' }]);
+  assert.deepEqual(parseRules('I pick scissors'), [{ do: 'rps', pick: 'scissors' }]);
+  assert.deepEqual(parseRules('rock on'), [{ do: 'gesture', name: 'horns' }]);
+});
+
+test('the box: go home, come out, and the step is no longer called a box', () => {
+  assert.deepEqual(parseRules('go home'), [{ do: 'routine', name: 'home' }]);
+  assert.deepEqual(parseRules('get in your box'), [{ do: 'routine', name: 'home' }]);
+  assert.deepEqual(parseRules('come out'), [{ do: 'routine', name: 'out' }]);
+  assert.equal(parseRules('go to the step')[0].do, 'walkTo');
+});
+
 test('"come back" comes to the front, and help is the page\'s to answer', () => {
   assert.deepEqual(one('come back'), { do: 'walkTo', x: 3.5, z: 3.5, speed: C.SPEED.strut });
   assert.ok(one('go back').x < 0, 'a bare "back" is still away from the viewer');

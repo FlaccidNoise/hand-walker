@@ -12,7 +12,12 @@ import { PAINT } from './paint.js';
 // ball: rolls, slows, bounces off the room, takes an impulse from the hand's body.
 // Returns true when it bounces off a wall hard enough to be worth a look (WALL_LOUD u/s)
 const BODY_R = 0.6, ROLL_DECEL = 0.55, WALL_REST = 0.6, WALL_LOUD = 0.4;
-export function stepBall(b, dt, hand) {
+// the floor dishes up toward the walls: the wrist stops at ROOM.half, 1.85 u short of them,
+// and a ball at rest by a wall was out of the hand's reach for good (measured: stranded
+// 1.40 u from the nearest spot the hand can stand, contact is 0.92). COVE beats ROLL_DECEL,
+// so the ball always comes back to within reach
+const COVE = 0.9;
+export function stepBall(b, dt, hand, blocks = []) {
   const dx = b.x - hand.x, dz = b.z - hand.z, d = Math.hypot(dx, dz), contact = b.r + BODY_R;
   if (d < contact && d > 1e-6 && hand.y < 2.2) {            // (a jumping hand clears it)
     const nx = dx / d, nz = dz / d, vn = hand.vx * nx + hand.vz * nz;
@@ -20,9 +25,18 @@ export function stepBall(b, dt, hand) {
     if (vn > 0.02) { b.vx = nx * vn * 1.35; b.vz = nz * vn * 1.35; }
     else if (Math.hypot(b.vx, b.vz) < 0.05) { b.vx = nx * 0.25; b.vz = nz * 0.25; }
   }
+  const reach = C.ROOM.half + contact - 0.25;
+  if (Math.abs(b.x) > reach) b.vx -= Math.sign(b.x) * COVE * dt;
+  if (Math.abs(b.z) > reach) b.vz -= Math.sign(b.z) * COVE * dt;
   const s = Math.hypot(b.vx, b.vz);
   if (s > 0) { const k = Math.max(0, s - ROLL_DECEL * dt) / s; b.vx *= k; b.vz *= k; }
   b.x += b.vx * dt; b.z += b.vz * dt;
+  for (const k of blocks) {                                   // a solid thing on the floor: out by the near side, and back
+    const px = Math.min(b.x - (k.x0 - b.r), k.x1 + b.r - b.x), pz = Math.min(b.z - (k.z0 - b.r), k.z1 + b.r - b.z);
+    if (px <= 0 || pz <= 0) continue;
+    if (px < pz) { const out = b.x < (k.x0 + k.x1) / 2 ? -1 : 1; b.x += out * px; b.vx = out * Math.abs(b.vx) * WALL_REST; }
+    else { const out = b.z < (k.z0 + k.z1) / 2 ? -1 : 1; b.z += out * pz; b.vz = out * Math.abs(b.vz) * WALL_REST; }
+  }
   const lim = C.ROOM.wall - 0.1 - b.r;
   let hit = 0;
   if (Math.abs(b.x) > lim) { hit = Math.abs(b.vx); b.x = Math.sign(b.x) * lim; b.vx = -b.vx * WALL_REST; }
@@ -43,6 +57,17 @@ export function switchFlips(sw, hand) {
   if (sw.armed && near && hand.y > sw.reachY) { sw.armed = false; return true; }
   return false;
 }
+
+// Thing's box, in the corner right of the door: its home. Sized from the hand (mesh
+// extents, measured): walking it is 0.6 u wide to one side of the wrist and 0.75 to the
+// other and reaches 1.6 ahead; lying on its side it is 0.23 and 0.95 wide, 1.51 long and
+// 0.99 high. The wrist cannot pass ROOM.half, so that is the lane it walks in on (BOX_LANE)
+// and the box sits 0.2 to the side of it, where the lying hand is centred
+const BOX_LANE = C.ROOM.half;
+export const BOX = { x: BOX_LANE + 0.2, z: -C.ROOM.half, w: 1.9, d: 2.5, h: 1.25 };
+BOX.x0 = BOX.x - BOX.w / 2; BOX.x1 = BOX.x + BOX.w / 2; BOX.z0 = BOX.z - BOX.d / 2; BOX.z1 = BOX.z + BOX.d / 2;
+const BOX_BED = BOX.z + 0.5;                                  // where the wrist lies: fingers to the back wall, stump inside the front
+export const inBox = (x, z) => x > BOX.x0 && x < BOX.x1 && z > BOX.z0 && z < BOX.z1;
 
 // floor piano: a strip of keys laid along z. Which key is under a point, or -1.
 export const PIANO = { x0: -4.5, x1: -3.3, z0: -1.6, keyW: 0.4,
@@ -239,6 +264,27 @@ export function makeProps({ scene, lights }) {
   const zLo = PIANO.z0 - 0.5, zHi = PIANO.z0 + PIANO.notes.length * PIANO.keyW + 0.5, xMid = (PIANO.x0 + PIANO.x1) / 2;
   let handZ = 0;                                              // the piano is played from the nearer end
 
+  // Thing's box: three walls, a front that drops like a drawbridge, a lid hinged on the
+  // west side (it stands behind the hand from the viewer's side). Plain walnut and brass.
+  // lid and flap run 0 (shut) to 1 (open) toward lidT and flapT
+  const boxG = new THREE.Group(), BT = 0.07, walnut = mat(0x2a1a11, { roughness: 0.55 }), walnutLt = mat(0x4a2f1d, { roughness: 0.5 });
+  const slab = (w, h, d, x, y, z, m, to = boxG) => {
+    const part = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    part.position.set(x, y, z); part.castShadow = part.receiveShadow = true; to.add(part);
+    return part;
+  };
+  slab(BOX.w, BOX.h, BT, 0, BOX.h / 2, -BOX.d / 2, walnut);                    // back
+  for (const sx of [-1, 1]) slab(BT, BOX.h, BOX.d, sx * BOX.w / 2, BOX.h / 2, 0, walnut);
+  slab(BOX.w, 0.02, BOX.d, 0, 0.012, 0, mat(0x6a1418, { roughness: 1 }));      // felt
+  const flapG = new THREE.Group(), lidG = new THREE.Group();
+  flapG.position.set(0, 0, BOX.d / 2); lidG.position.set(-BOX.w / 2, BOX.h, 0); boxG.add(flapG, lidG);
+  slab(BOX.w, BOX.h, BT, 0, BOX.h / 2, 0, walnutLt, flapG);
+  slab(BOX.w + 2 * BT, BT, BOX.d + 2 * BT, BOX.w / 2, BT / 2, 0, walnutLt, lidG);
+  slab(0.05, 0.1, 0.5, BOX.w + BT, 0, 0, brass, lidG);                         // the pull
+  boxG.position.set(BOX.x, 0, BOX.z); scene.add(boxG);
+  const box = { lid: 0, flap: 0, lidT: 0, flapT: 0, rattle: -1, near: false };
+  const LID_OPEN = 1.45, LID_CRACK = 0.2;                     // rad · share of it when the lid lifts a crack
+
   const state = { lights: true, level: 1, ringT: -1 };
   const axis = new THREE.Vector3();
   // `plan`: what the hand does once it stands at `anchor` facing `facing` (world heading, rad)
@@ -255,6 +301,17 @@ export function makeProps({ scene, lights }) {
         const a = this.anchor.z === zLo ? zLo : zHi, b = a === zLo ? zHi : zLo;
         return [{ do: 'walkTo', x: xMid, z: b, speed: C.SPEED.strut }, { do: 'walkTo', x: xMid, z: a, speed: C.SPEED.scuttle }, { do: 'gesture', name: 'bow' }];
       } },
+    // home. Used from outside: walk in, lie down with its back to the room, and the box
+    // shuts on it. `at` = [gesture s, event]: the brain fires them as the gesture plays.
+    // `out` is the way back: it turns round unseen (a hand turning in there swept its
+    // fingers through the side: filmed), sits up under the lid, and the front drops before
+    // it stands. `open` fires as the hand sets off, so the front is down when it arrives
+    box: { label: 'box', mesh: boxG, solid: BOX, anchor: { x: BOX_LANE, z: BOX.z1 + 0.75 }, facing: Math.PI / 2, open: 'boxOpen',
+      plan: () => [{ do: 'walkTo', x: BOX_LANE, z: BOX_BED, speed: C.SPEED.strut },
+        { do: 'gesture', name: 'nestle', at: [[1.1, 'boxShut'], [1.8, 'hide']] }],
+      out: () => [{ do: 'turn', deg: 180 },
+        { do: 'gesture', name: 'emerge', at: [[0.2, 'boxRattle'], [0.7, 'boxRattle'], [1.2, 'boxCrack'], [1.25, 'show'], [2.0, 'boxLid'], [2.8, 'boxOpen']] },
+        { do: 'walkTo', x: BOX_LANE, z: BOX.z1 + 0.95, speed: C.SPEED.strut }, { do: 'gesture', name: 'stretch', fire: 'boxShut' }] },
   };
   // things that happen in the room are told to whoever listens (the brain: the hand reacts).
   // Events go out, hand state never comes in
@@ -262,6 +319,11 @@ export function makeProps({ scene, lights }) {
   const fire = {
     switch() { state.lights = !state.lights; toggle.rotation.x = state.lights ? 0 : 0.5; SOUNDS.click(); onEvent?.(state.lights ? 'lightsOn' : 'lightsOff'); },
     bell() { state.ringT = 0; SOUNDS.ding(); onEvent?.('bell'); },
+    boxOpen() { box.lidT = box.flapT = 1; SOUNDS.click(); },
+    boxShut() { if (box.lidT || box.flapT) SOUNDS.knock(); box.lidT = box.flapT = 0; },
+    boxCrack() { box.lidT = LID_CRACK; box.rattle = 0; SOUNDS.tick(); },
+    boxLid() { box.lidT = 1; SOUNDS.click(); },
+    boxRattle() { box.rattle = 0; SOUNDS.tick(); },
   };
 
   return {
@@ -282,7 +344,16 @@ export function makeProps({ scene, lights }) {
       }
       if (switchFlips(sw, hand)) fire.switch();
       if (bellRings({ x: -3.2, z: 3.2, r: 0.9 }, hand, landed)) fire.bell();
-      if (stepBall(ball, dt, hand)) onEvent?.('wall', { x: ball.x, z: ball.z });
+      if (stepBall(ball, dt, hand, [BOX])) onEvent?.('wall', { x: ball.x, z: ball.z });
+      // the box: lid and flap ease to their targets, a rattle shakes the lid, and it shuts
+      // itself behind a hand that walks away from it open
+      const far = Math.hypot(hand.x - BOX.x, hand.z - BOX.z) > 3;
+      if (!far) box.near = true; else if (box.near) { box.near = false; fire.boxShut(); }
+      const k = 1 - Math.exp(-dt / 0.09);
+      box.lid += (box.lidT - box.lid) * k; box.flap += (box.flapT - box.flap) * k;
+      if (box.rattle >= 0 && (box.rattle += dt) > 0.45) box.rattle = -1;
+      lidG.rotation.z = LID_OPEN * box.lid + (box.rattle >= 0 ? 0.05 * Math.abs(Math.sin(box.rattle * 42)) * Math.exp(-box.rattle * 5) : 0);
+      flapG.rotation.x = Math.PI / 2 * box.flap;
       ballM.position.set(ball.x, ball.r, ball.z);
       const s = Math.hypot(ball.vx, ball.vz);
       if (s > 1e-4) { axis.set(ball.vz / s, 0, -ball.vx / s); ballM.rotateOnWorldAxis(axis, s * dt / ball.r); }
@@ -312,6 +383,6 @@ export function makeProps({ scene, lights }) {
       return best;
     },
     // for the LLM prompt: what is here and what state it is in
-    describe: () => `Things in the room (use them with {"do":"use","target":ID}): switch = the light switch, you jump to flip it (lights are ${state.lights ? 'ON' : 'OFF'}); bell = a desk bell, you jump on it to ring it; ball = a ball, you run into it to kick it; rug = your nap rug; piano = a floor piano, you walk along the keys to play it.`,
+    describe: () => `Things in the room (use them with {"do":"use","target":ID}): switch = the light switch, you jump to flip it (lights are ${state.lights ? 'ON' : 'OFF'}); bell = a desk bell, you jump on it to ring it; ball = a ball, you run into it to kick it; rug = your nap rug; piano = a floor piano, you walk along the keys to play it; box = your box, your home: use it to go in and shut the lid, use it again to come out.`,
   };
 }

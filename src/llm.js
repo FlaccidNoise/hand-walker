@@ -15,7 +15,8 @@ const PLACES = { center: [0, 0], step: [0, 2.4], corner: [-4, -4], door: [0, -4.
 const S = Math.SQRT1_2;
 const DIRS = { left: [-S, S], right: [S, -S], closer: [S, S], back: [-S, -S] };
 const THINGS = ['switch', 'bell', 'ball', 'rug', 'piano'];
-const NAMES = ['wave', 'yes', 'no', 'idk', 'laugh', 'bow', 'point', 'beckon', 'thinking', 'tap', 'thumbsUp', 'thumbsDown', 'sleep', 'dance', 'knock', 'playDead'];
+const NAMES = ['wave', 'yes', 'no', 'idk', 'laugh', 'bow', 'point', 'beckon', 'thinking', 'tap', 'thumbsUp', 'thumbsDown', 'sleep', 'dance', 'knock', 'playDead',
+  'shake', 'peek', 'startle', 'peace', 'horns', 'highFive', 'snap'];
 
 const SYS = `You control Thing, a severed hand that walks on its fingertips in a small room. Turn the request into JSON: {"steps":[...]}. Each step is EXACTLY one of:
 {"do":"go","to":"center"} — to is one of: center, step, corner, door, front
