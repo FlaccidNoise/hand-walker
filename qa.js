@@ -11,9 +11,10 @@
 //   towed     any leg dragged planted at err>0.15 for >0.5s none
 //   clear     worst swing peak / carried-digit clearance (u)   >= 0.10
 //   touchdown tip travel in the landing sim step (u)           <= 0.035
-//   tipJump   largest tip move in one sim step, on the ground  <= 0.15 (hopScuttle, at 120 Hz).
-//             A swing step runs to 0.07. A digit towed out of reach and thrown by the
-//             ground constraint moved 0.32
+//   tipJump   largest tip move in one sim step, on the ground  <= 0.20 (0.15 hopScuttle), at 120 Hz.
+//             A swing step runs to 0.07, a rescue swing at a run to 0.14. A digit towed out
+//             of reach and thrown by the ground constraint moved 0.32; a swing that changed
+//             elbow branch as it lifted (braking from a sprint) was thrown 0.82
 // KNOWN_RED scenarios are allowed to fail (named, with the reason); every other one
 // must pass. The gate runs on a virtual clock, so results are bit-reproducible.
 
@@ -23,7 +24,7 @@ const CRIT = { slide: 0.5, slidePerU: 0.10, gap: 0.40, floor: -0.01, tipErrP95: 
   clear: 0.10,     // every swing peak and every carried digit clears the floor by this
   plantedMin: 2, bodyBob: 0.06,     // pivot180 only: support never drops, the wrist does not hop
   tipStep: 0.16, returnErr: 0.02,   // gestures only: no digit snaps, every tip comes back to rest
-  touchdown: 0.035,
+  touchdown: 0.035, tipJump: 0.20,
   restErr: 0.10, stopSettle: 0.7 }; // stop only: feet end on their rest spots, all motion over in this many s               // tip travel in the landing sim step: placed, not scuffed (was 0.054-0.070)
 // a pivot re-steps every digit ~10 times: its slide bar is its own (0.034 per stance)
 const SLIDE = { pivot180: 2.0 };
@@ -219,7 +220,7 @@ function makeRecorder(H) {
         if (m.slidePerU > (SLIDE_PER_U[name] ?? CRIT.slidePerU)) fails.push(`slide/u ${m.slidePerU}`);
       } else if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
       if (G && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
-      if (TIP_JUMP[name] && L.jumpSteps === 1 && m.tipJump > TIP_JUMP[name]) fails.push(`tip jump ${m.tipJump} (${L.jumpWho})`);
+      if (!G && L.jumpSteps === 1 && m.tipJump > (TIP_JUMP[name] ?? CRIT.tipJump)) fails.push(`tip jump ${m.tipJump} (${L.jumpWho})`);
       if (m.touchdown > (TOUCH[name] ?? CRIT.touchdown)) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
       if (name === 'stop' && m.stopSettle > CRIT.stopSettle) fails.push(`settle ${m.stopSettle}s`);
       if (name === 'pivot180') {

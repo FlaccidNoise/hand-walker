@@ -412,7 +412,13 @@ function makeSim(rig, calib) {
     // rest of the swing, so the unfold never races the rate cap into touchdown
     const fold = sw.rescue && t < C.RESCUE_HOLD ? 1
       : t < fEnd ? Math.sin(Math.PI * t / fEnd) : 0;
-    solveLegWorld(f, target, C.RATE_SWING, dt, fold, null, true);
+    // the elbow branch the digit left the floor with, kept for the swing. Re-selected
+    // freely, a pinky lifting from behind its knuckle (braking from a sprint) changed
+    // branch on its first step: the rate-capped joints crossed to the other solution
+    // over four steps with the tip dragged backward on the floor, and the ground
+    // constraint then threw it 0.82 u in one. (The thumb still re-selects: pinned, its
+    // re-plant after a carry landed at 0.048 u a step and its steps shortened 10%)
+    solveLegWorld(f, target, C.RATE_SWING, dt, fold, d.isThumb ? null : leg.branch ?? null, true);
     if (t >= 1) {                                            // pin stance at the ACHIEVED tip
       d.tip.getWorldPosition(leg.foot);
       // a footfall twitches the body: a nod, and a lean toward the side that landed
