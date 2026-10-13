@@ -70,6 +70,10 @@ test('an unknown source or action fails loudly', () => {
   assert.throws(() => m.brain.command([{ do: 'jump' }], { source: 'gamepad' }), /unknown source/);
   assert.equal(m.brain.command([{ do: 'teleport' }], { source: 'click' }), false);
   assert.equal(m.brain.st.status, 'idle', 'an error is reported, not a status to live in');
+  assert.match(m.brain.st.error, /teleport/, 'and it is on record for the gates');
+  m.brain.command([{ do: 'jump' }], { source: 'click' });
+  assert.equal(m.brain.st.error, null, 'until a new plan starts');
+  m.brain.command([{ do: 'teleport' }], { source: 'click' });
   assert.equal(m.said.at(-1)[1], 'error');
   assert.match(m.said.at(-1)[0], /unknown action "teleport"/);
 });
@@ -409,4 +413,12 @@ test('woken from a nap, it stretches before it does what it was asked', () => {
   m.sim.s.gesture = { name: 'sleep', t: 3, dur: 16 };
   m.brain.command([{ do: 'gesture', name: 'yes' }], { source: 'key' });
   assert.deepEqual(m.brain.st.plan.map(a => a.name), ['rouse', 'yes']);
+});
+
+test('a pet forgives the pokes', () => {
+  const m = mock();
+  m.brain.poke(); m.step(0.6); m.brain.poke(); m.step(0.6);
+  m.brain.soothe();
+  m.brain.poke();
+  assert.equal(m.brain.st.plan.find(a => a.do === 'gesture').name, 'laugh', 'the first poke again');
 });
