@@ -328,8 +328,10 @@ const SCENARIOS = {
     let berr = null;                                         // a brain error arrives through onsay
     const page = H.brain.st.onsay;
     H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
-    H.brain.run([{ do: 'walkTo', x: 3, z: 0, speed: 0.8 }, { do: 'walkTo', x: 3, z: -3, speed: 0.8 },
-      { do: 'walkTo', x: 0, z: -3, speed: 0.8 }, { do: 'walkTo', x: 0, z: 0, speed: 0.8 }]);
+    // (x stops at 2.4: at 3 the second corner stood inside Thing's box, and the brain now
+    // ends a walk clear of it, which bent the square)
+    H.brain.run([{ do: 'walkTo', x: 2.4, z: 0, speed: 0.8 }, { do: 'walkTo', x: 2.4, z: -3, speed: 0.8 },
+      { do: 'walkTo', x: -0.6, z: -3, speed: 0.8 }, { do: 'walkTo', x: -0.6, z: 0, speed: 0.8 }]);
     for (let i = 0; i < 400 && H.brain.st.i >= 0; i++) await sleep(100);
     H.brain.st.onsay = page;
     if (berr) throw new Error('clickWalk: brain ' + berr);

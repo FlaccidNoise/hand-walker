@@ -351,14 +351,14 @@
   "cmdEnd": 4.51
  },
  "gestures": {
-  "slide": 0.068,
+  "slide": 0.071,
   "cross": -0.558,
   "floor": 0.079,
   "tipErrP95": 0.023,
   "swingMin": 0.156,
   "swingMax": 0.156,
   "towed": false,
-  "steps": 75,
+  "steps": 85,
   "lift": 0.356,
   "clear": {
    "thumb": 0.185,
@@ -370,11 +370,11 @@
   "aloftClear": null,
   "plantedMin": 0,
   "stepLen": {
-   "thumb": 0.442,
-   "index": 0.37,
-   "middle": 0.572,
-   "ring": 0.746,
-   "pinky": 0.419
+   "thumb": 0.454,
+   "index": 0.373,
+   "middle": 0.559,
+   "ring": 0.7,
+   "pinky": 0.407
   },
   "footfallsPerU": null,
   "slidePerU": null,
@@ -507,15 +507,15 @@
   "cmdEnd": null
  },
  "clickWalk": {
-  "slide": 1.438,
-  "cross": -0.073,
+  "slide": 1.356,
+  "cross": -0.064,
   "floor": 0.079,
   "tipErrP95": 0.012,
   "swingMin": 0.106,
   "swingMax": 0.5,
   "towed": false,
-  "steps": 191,
-  "lift": 0.329,
+  "steps": 185,
+  "lift": 0.33,
   "clear": {
    "thumb": 0.172,
    "index": 0.195,
@@ -526,24 +526,24 @@
   "aloftClear": null,
   "plantedMin": 2,
   "stepLen": {
-   "thumb": 0.393,
-   "index": 0.45,
-   "middle": 0.454,
-   "ring": 0.478,
-   "pinky": 0.456
+   "thumb": 0.385,
+   "index": 0.458,
+   "middle": 0.462,
+   "ring": 0.464,
+   "pinky": 0.449
   },
-  "footfallsPerU": 16.11,
-  "slidePerU": 0.121,
+  "footfallsPerU": 16.44,
+  "slidePerU": 0.12,
   "gap": 0.446,
-  "gapWho": "index/middle t=17.44",
-  "touchdown": 0.0265,
+  "gapWho": "index/middle t=16.74",
+  "touchdown": 0.0362,
   "tipStep": 0.076,
   "tipJump": 0.076,
-  "jumpWho": "middle swing t=12.62",
+  "jumpWho": "middle swing t=11.92",
   "bodyBob": 0.07,
   "stopSettle": 0.687,
-  "dist": 11.85,
-  "cmdEnd": 21.28
+  "dist": 11.25,
+  "cmdEnd": 20.59
  },
  "hopScuttle": {
   "slide": 0.216,
