@@ -93,8 +93,6 @@ async function init() {
     if (k === 'r') { brain.stop(); sim.reset(); }
   });
 
-  // camera is the fixed diorama view set in buildScene — nothing to do here
-
   const clock = new THREE.Clock();
   let frames = 0, fpsT = 0, acc = 0;
   function loop() {

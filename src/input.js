@@ -23,6 +23,7 @@ export const EMOTE_KEYS = ['wave', 'yes', 'no', 'idk', 'laugh', 'bow', 'thumbsUp
 const POKE_R = 0.6;                 // u — a click this close to the hand's middle is a poke
 const NOTICE_AFTER = 1.6;           // s the cursor rests on the floor before the hand looks
 const COME_AFTER = 5;               // s more before it walks over
+const REST_PX = 12;                 // px the mouse may drift and still count as resting
 const TOUCH = matchMedia('(pointer: coarse)').matches;
 const PROP_PAD = TOUCH ? 22 : 8;    // px — a press this near a thing's middle counts as on it
 const HAND_PAD = TOUCH ? 26 : 0;    // px — and this near the palm is a poke, however small the hand is drawn
@@ -76,9 +77,17 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
     else { halo.rotation.y = Math.PI / 2; halo.scale.set(k(size.z), k(size.y), 1); halo.position.set(box.max.x + 0.02, mid.y, mid.z); }
   }
   // the resting cursor: where it is on the floor, how long it has been still, what the hand has done about it
-  const cur = { on: false, x: 0, z: 0, still: 0, stage: 0 };
+  const cur = { on: false, x: 0, z: 0, px: 0, py: 0, still: 0, stage: 0 };
   let hover = null, flash = null, flashT = 0;                 // thing under the mouse · thing just pressed, and its fade
   let lead = null;                                            // a held pointer: { id, x, y, moved, tx, tz }
+  let mouse = null;                                           // where the mouse is. The camera moves under a still
+  function look() {                                           // mouse, so what it is over is read again every frame
+    aim(mouse);
+    hover = lead ? null : under(mouse);
+    cv.style.cursor = hover ? 'pointer' : '';
+    cur.on = !!ray.ray.intersectPlane(floor, hit) && Math.abs(hit.x) <= half && Math.abs(hit.z) <= half;
+    if (cur.on) { cur.x = hit.x; cur.z = hit.z; }
+  }
   cv.addEventListener('pointermove', (e) => {
     if (controls.enabled) return;
     if (lead && e.pointerId === lead.id) {
@@ -86,14 +95,11 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
       lead.x = e.clientX; lead.y = e.clientY;
     }
     if (e.pointerType !== 'mouse') return;
-    aim(e);
-    hover = lead ? null : under(e);
-    cv.style.cursor = hover ? 'pointer' : '';
-    if (!ray.ray.intersectPlane(floor, hit) || Math.abs(hit.x) > half || Math.abs(hit.z) > half) { cur.on = false; return; }
-    if (!cur.on || Math.hypot(hit.x - cur.x, hit.z - cur.z) > 0.25) { cur.x = hit.x; cur.z = hit.z; cur.still = 0; cur.stage = 0; }
-    cur.on = true;
+    mouse = { clientX: e.clientX, clientY: e.clientY };
+    if (Math.hypot(e.clientX - cur.px, e.clientY - cur.py) > REST_PX) { cur.px = e.clientX; cur.py = e.clientY; cur.still = 0; cur.stage = 0; }
+    look();
   });
-  cv.addEventListener('pointerleave', () => { cur.on = false; hover = null; });
+  cv.addEventListener('pointerleave', () => { mouse = null; cur.on = false; hover = null; });
 
   cv.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || controls.enabled) return;         // debug orbit owns the pointer
@@ -188,6 +194,7 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
       marker.material.opacity = 0.7 * (1 - markerT);
       marker.scale.setScalar(1 + 0.5 * markerT);
     }
+    if (mouse && !controls.enabled) look();
     // ring and label: steady on the thing under the mouse, a short flash on a thing just pressed
     flashT = Math.max(0, flashT - dt / 0.6);
     const lit = hover && hover !== 'hand' ? hover : flashT > 0 ? flash : null, p = lit && props.get(lit);
