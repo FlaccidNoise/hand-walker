@@ -12,6 +12,11 @@ import { PAINT } from './paint.js';
 // ball: rolls, slows, bounces off the room, takes an impulse from the hand's body.
 // Returns true when it bounces off a wall hard enough to be worth a look (WALL_LOUD u/s)
 const BODY_R = 0.6, ROLL_DECEL = 0.55, WALL_REST = 0.6, WALL_LOUD = 0.4;
+// the floor dishes up toward the walls: the wrist stops at ROOM.half, 1.85 u short of them,
+// and a ball at rest by a wall was out of the hand's reach for good (measured: stranded
+// 1.40 u from the nearest spot the hand can stand, contact is 0.92). COVE beats ROLL_DECEL,
+// so the ball always comes back to within reach
+const COVE = 0.9;
 export function stepBall(b, dt, hand) {
   const dx = b.x - hand.x, dz = b.z - hand.z, d = Math.hypot(dx, dz), contact = b.r + BODY_R;
   if (d < contact && d > 1e-6 && hand.y < 2.2) {            // (a jumping hand clears it)
@@ -20,6 +25,9 @@ export function stepBall(b, dt, hand) {
     if (vn > 0.02) { b.vx = nx * vn * 1.35; b.vz = nz * vn * 1.35; }
     else if (Math.hypot(b.vx, b.vz) < 0.05) { b.vx = nx * 0.25; b.vz = nz * 0.25; }
   }
+  const reach = C.ROOM.half + contact - 0.25;
+  if (Math.abs(b.x) > reach) b.vx -= Math.sign(b.x) * COVE * dt;
+  if (Math.abs(b.z) > reach) b.vz -= Math.sign(b.z) * COVE * dt;
   const s = Math.hypot(b.vx, b.vz);
   if (s > 0) { const k = Math.max(0, s - ROLL_DECEL * dt) / s; b.vx *= k; b.vz *= k; }
   b.x += b.vx * dt; b.z += b.vz * dt;

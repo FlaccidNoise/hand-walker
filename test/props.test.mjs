@@ -68,3 +68,12 @@ test('ball: a hard hit on a wall is reported, a crawl into it is not', () => {
   for (let i = 0; i < 50; i++) if (stepBall(pinned, 0.01, { ...far, x: 4.7, vx: 1.8 })) pressed++;
   assert.equal(pressed, 0, 'pressed against the wall is not a bounce');
 });
+
+test('ball: a ball left by a wall rolls back to where the hand can reach it', () => {
+  const far = { x: 0, y: 1.4, z: 0, vx: 0, vz: 0, airborne: false };
+  const b = { x: C.ROOM.wall - 0.5, z: -(C.ROOM.wall - 0.5), r: 0.32, vx: 0, vz: 0 };
+  for (let i = 0; i < 3000; i++) stepBall(b, 0.01, far);
+  assert.equal(Math.hypot(b.vx, b.vz), 0, 'and comes to rest');
+  const gap = Math.hypot(Math.max(0, Math.abs(b.x) - C.ROOM.half), Math.max(0, Math.abs(b.z) - C.ROOM.half));
+  assert.ok(gap < b.r + 0.6, `rests ${gap.toFixed(2)} u from the hand's nearest stand`);
+});
