@@ -813,7 +813,7 @@ function makeSim(rig, calib) {
     s.vy = 0; s.heading = heading; s.yawRate = 0;
     s.gait = 'walk'; s.gaitT = 0; s.phase = 0; s.f = 0; s.speed = 0; s.planted = 5;
     s.airborne = false; s.replant = false; s.rideH = calib.standH; s.gesture = null; s.carry = null; s.pivotTarget = null; s.turnWait = 0; s.hop = null;
-    s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = DEV ? 1 : Date.now() % 0x7fffffff || 1;
+    s.lastInput = s.time; s.nextIdleAt = s.time; s.rng = DEV ? 1 : Date.now() % 0x7fffffff || 1; s.lastIdle = null;
     s.spr.pitch.x = s.spr.pitch.v = s.spr.roll.x = s.spr.roll.v = 0; stopKick = false;
     body.position.set(px, calib.standH, pz);
     applyBodyPose();

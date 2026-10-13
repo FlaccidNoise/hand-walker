@@ -159,9 +159,10 @@ export const GESTURES = {
   yes: { dur: 1.0, body: {
     pitch:  [[0, 0], [0.1, -0.05], [0.28, 0.26], [0.42, 0.06], [0.58, 0.26], [0.8, 0], [1, 0]],
     height: [[0, 0], [0.1, 0.02], [0.28, -0.14], [0.42, -0.03], [0.58, -0.14], [0.8, 0], [1, 0]] } },
-  // cross: the whole hand shakes itself. Roll holds on planted digits to 0.3 rad (scanned);
-  // at 0.22 the twist did not read from the app camera
-  shake: { dur: 0.9, body: { roll: [[0, 0], [0.15, 0.28], [0.4, -0.28], [0.65, 0.28], [0.85, 0], [1, 0]] } },
+  // cross: it draws itself up and shakes. Roll holds on planted digits to 0.3 rad (scanned).
+  // The twist alone is a silhouette change of a few pixels: the rear-back carries it
+  shake: { dur: 1.0, body: { roll: [[0, 0], [0.15, 0.28], [0.35, -0.28], [0.55, 0.28], [0.75, -0.28], [0.9, 0], [1, 0]],
+    pitch: [[0, 0], [0.12, -0.22], [0.8, -0.22], [1, 0]], height: [[0, 0], [0.12, 0.06], [0.8, 0.06], [1, 0]] } },
   // no: up on the stump, a fist, and the index wags. (Standing, the wag was hidden behind
   // the middle finger: filmed.) Wag keys are in the digit window's own 0..1
   no: (() => {
