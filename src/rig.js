@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { solveLeg } from './ik.js';
 import * as C from './tuning.js';
+import { PAINT } from './paint.js';
 
 export const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
 
@@ -322,37 +323,97 @@ export async function buildRig(url, handedness = C.HANDEDNESS) {
 
   let skin = null;
   root.traverse(o => { if (o.isSkinnedMesh && !skin) skin = o; });
-  dressHand(skin, wrist);
+  dressHand(skin, wrist, digits);
 
   return { gltf, mount, root, wrist, digits, WORLD_M, G, scale, handedness, palmDepth };
 }
 
-// the look of the hand: skin tone, a blush on the fingertips, and a stitched scar where
-// the wrist ends. Colour and wrist-bone children only: no joint or skin weight changes,
-// so the calibration never sees it. Lengths are bind metres (the wrist bone's space).
-function dressHand(mesh, wrist) {
+// the look of the hand: a painted skin (nails, creases, blush: src/paint.js) and a
+// stitched scar where the wrist ends. A texture and wrist-bone children only: no joint
+// or skin weight changes, so the calibration never sees it. All of it is worked out in
+// the mesh's bind space, in metres.
+function dressHand(mesh, wrist, digits) {
   mesh.castShadow = mesh.receiveShadow = true;               // without a shadow the hand floats
-  const g = mesh.geometry, pos = g.attributes.position, nor = g.attributes.normal;
-  const si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
-  const tipBone = mesh.skeleton.bones.map(b => /distal|tip/.test(b.name));
+  const g = mesh.geometry, pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv, tri = g.index;
+  const V = (...a) => new THREE.Vector3(...a), mix = (a, b, t) => V().lerpVectors(a, b, t);
+  const bones = mesh.skeleton.bones;
+  const joint = (name) => new THREE.Matrix4()                // a joint's bind frame, in the geometry's space
+    .multiplyMatrices(mesh.skeleton.boneInverses[bones.findIndex(b => b.name === name)], mesh.bindMatrix).invert();
+  const at = (name) => V().setFromMatrixPosition(joint(name));
+
+  // the skin's UV where a ray from inside the hand comes out. `far` is how far that was
+  const ray = new THREE.Ray(), A = V(), B = V(), C = V(), hit = V(), u2 = [0, 1, 2].map(() => new THREE.Vector2());
+  let far = 0;
+  const skinUV = (from, dir) => {
+    let best = Infinity, out = null;
+    ray.set(from, dir);
+    for (let t = 0; t < tri.count; t += 3) {
+      const [a, b, c] = [tri.getX(t), tri.getX(t + 1), tri.getX(t + 2)];
+      if (!ray.intersectTriangle(A.fromBufferAttribute(pos, a), B.fromBufferAttribute(pos, b), C.fromBufferAttribute(pos, c), false, hit)) continue;
+      const d = hit.distanceToSquared(from);
+      if (d < best) { best = d; out = THREE.Triangle.getInterpolation(hit, A, B, C, u2[0].fromBufferAttribute(uv, a), u2[1].fromBufferAttribute(uv, b), u2[2].fromBufferAttribute(uv, c), new THREE.Vector2()); }
+    }
+    far = Math.sqrt(best);
+    return out;
+  };
+  // a patch of skin: its UV, and the UV step per metre across and along the digit
+  const patch = (p, along, out, e = 0.002) => {
+    const side = V().crossVectors(along, out).normalize();
+    const o = skinUV(p, out), x = skinUV(mix(p, V().addVectors(p, side), e), out), y = skinUV(mix(p, V().addVectors(p, along), e), out);
+    return [(x.x - o.x) / e, (x.y - o.y) / e, (y.x - o.x) / e, (y.y - o.y) / e, o.x, o.y];
+  };
+
+  const marks = [], J = {}, palm = V();
+  for (const f of FINGERS) {
+    const j = J[f] = chainNames(f).map(at), n = j.length, thumb = f === 'thumb';
+    // the hinge: the root joint's flexion axis, signed so a curl closes toward the palm.
+    // The thumb's last joint keeps its own (the GLB's thumb hinges are 40° apart)
+    const hinge = V().setFromMatrixColumn(joint(chainNames(f)[thumb ? 0 : 1]), 0).normalize().multiplyScalar(digits[f].curlSign);
+    const own = V().setFromMatrixColumn(joint(`${jointPrefix(f)}-phalanx-distal`), 0).normalize();
+    const along = (i) => V().subVectors(j[i + 1], j[i]).normalize();
+    const pad = (i) => V().crossVectors(thumb && i === n - 2 ? own.multiplyScalar(Math.sign(own.dot(hinge))) : hinge, along(i)).normalize();
+    const back = (i) => pad(i).negate();
+    // the last segment runs past the GLB's tip joint, to the skin. Its length and the digit's half width, in mm
+    skinUV(j[n - 1], along(n - 2));
+    const end = V().copy(j[n - 1]).addScaledVector(along(n - 2), far), len = end.distanceTo(j[n - 2]) * 1000;
+    skinUV(j[n - 2], back(n - 2));
+    const r = far * 1000;
+    marks.push(['nail', patch(mix(j[n - 2], end, 0.64), along(n - 2), back(n - 2)), thumb ? 1.2 * len : len],
+      ['pad', patch(mix(j[n - 2], end, 0.55), along(n - 2), pad(n - 2)), r]);
+    for (let i = 1; i < n - 1; i++) {
+      marks.push([i === 1 ? 'knuckle' : 'joint', patch(j[i], along(i), back(i)), r, i === n - 2 ? 2 : 3]);
+      if (i > 1 || thumb) marks.push(['crease', patch(j[i], along(i), pad(i)), r, i === n - 2 ? 1 : 2]);
+    }
+    if (!thumb) marks.push(['crease', patch(mix(j[1], j[2], 0.42), along(1), pad(1)), r, 2]);   // where the finger leaves the palm
+    if (f === 'middle') palm.copy(pad(0));
+  }
+  const W = at('wrist'), mid = (a, b) => mix(a, b, 0.5), web = mix(J.index[1], J.thumb[1], 0.4);
+  marks.push(['flush', patch(mid(J.thumb[0], J.thumb[1]), V().subVectors(J.thumb[1], J.thumb[0]).normalize(), palm), 22],
+    ['flush', patch(mix(W, J.pinky[1], 0.4), V().subVectors(J.pinky[1], W).normalize(), palm), 20]);
+  const lines = [                                            // the palm's three lines
+    [mix(J.pinky[1], W, 0.08), mix(J.ring[1], W, 0.1), mix(J.middle[1], W, 0.08), mix(mid(J.middle[1], J.index[1]), W, -0.02)],
+    [web, mix(J.middle[1], W, 0.3), mix(J.ring[1], W, 0.4), mix(J.pinky[1], W, 0.5)],
+    [web, mix(J.index[1], W, 0.5), mix(mix(W, J.middle[1], 0.25), J.thumb[0], 0.35), mix(W, J.thumb[0], 0.3)],
+  ].map(l => l.map(p => skinUV(p, palm)));
+
   let yMax = -Infinity;
   for (let i = 0; i < pos.count; i++) yMax = Math.max(yMax, pos.getY(i));
-  const col = new Float32Array(pos.count * 3), rim = [], ctr = new THREE.Vector3();
-  for (let i = 0; i < pos.count; i++) {
-    let t = 0;
-    for (let k = 0; k < 4; k++) if (tipBone[si.getComponent(i, k)]) t += sw.getComponent(i, k);
-    t *= 0.55;
-    col.set([1, 1 - 0.14 * t, 1 - 0.17 * t], i * 3);
-    if (nor.getY(i) > 0.8 && pos.getY(i) > yMax - 0.012) {    // the flat face of the stump (bind +Y)
-      col.set([0.80, 0.68, 0.66], i * 3);
-      const v = mesh.getVertexPosition(i, new THREE.Vector3());
-      rim.push(wrist.worldToLocal(mesh.localToWorld(v))); ctr.add(v);
-    }
+  const rim = [], ctr = V(), capUV = new THREE.Vector2(), rimUV = [];
+  for (let i = 0; i < pos.count; i++) if (nor.getY(i) > 0.8 && pos.getY(i) > yMax - 0.012) {    // the flat face of the stump (bind +Y)
+    const v = mesh.getVertexPosition(i, V());
+    rim.push(wrist.worldToLocal(mesh.localToWorld(v))); ctr.add(v);
+    rimUV.push(new THREE.Vector2().fromBufferAttribute(uv, i)); capUV.add(rimUV.at(-1));
   }
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  capUV.divideScalar(rimUV.length);
+  marks.push(['cap', [1, 0, 0, 1, capUV.x, capUV.y], 1250 * Math.max(...rimUV.map(p => p.distanceTo(capUV)))]);   // its own UV island: sized in UV / 1000
+
   const m = mesh.material;
-  m.color.set(0xd9b29a); m.roughness = 0.6; m.vertexColors = true;
+  m.map = PAINT.skin(marks, lines); m.color.set(0xffffff); m.roughness = 1;
   m.emissive.set(0x4a140c); m.emissiveIntensity = 0.22;      // a warm lift in the shadow side
+  m.onBeforeCompile = (sh) => {                              // roughness is the right half of the skin texture
+    sh.fragmentShader = sh.fragmentShader.replace('#include <roughnessmap_fragment>',
+      '#include <roughnessmap_fragment>\n\troughnessFactor *= texture2D( map, vMapUv + vec2( 0.5, 0.0 ) ).g;');
+  };
 
   // scar ridge: a tube through the face's rim, with stitches across it
   ctr.divideScalar(rim.length);
@@ -365,17 +426,18 @@ function dressHand(mesh, wrist) {
   const rMax = Math.max(...rim.map(p => p.distanceTo(ctr)));
   const curve = new THREE.CatmullRomCurve3(
     rim.filter(p => p.distanceTo(ctr) > 0.5 * rMax).sort((p, q) => ang(p) - ang(q)), true);
-  const ridge = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.0022, 8, true),
-    new THREE.MeshStandardMaterial({ color: 0xb98676, roughness: 0.7, emissive: 0x4a140c, emissiveIntensity: 0.2 }));
+  // one material for both (the stitches darken it per instance), and no Object3D to place
+  // them: every three.js object made at startup moves the gates' seeded random stream
+  const scar = new THREE.MeshStandardMaterial({ color: 0xb98676, roughness: 0.75, emissive: 0x4a140c, emissiveIntensity: 0.2 });
+  const ridge = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.0022, 8, true), scar);
   ridge.castShadow = true;
-  const N = 12, stitches = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0009, 0.0009, 0.007),
-    new THREE.MeshStandardMaterial({ color: 0x1a1210, roughness: 0.8 }), N);
-  const o = new THREE.Object3D(), Z = new THREE.Vector3(0, 0, 1);
+  const N = 12, stitches = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0009, 0.0009, 0.007), scar, N);
+  const M = new THREE.Matrix4(), P = V(), Q = new THREE.Quaternion(), Z = V(0, 0, 1), ONE = V(1, 1, 1), thread = new THREE.Color(0.03, 0.022, 0.02);
   for (let i = 0; i < N; i++) {                              // each lies over the ridge and down the wrist's side
-    curve.getPointAt(i / N, o.position);
-    o.position.addScaledVector(c.copy(o.position).sub(ctr).normalize(), 0.002).addScaledVector(n, -0.0015);
-    o.quaternion.setFromUnitVectors(Z, c.copy(n).addScaledVector(curve.getTangentAt(i / N), 0.35).normalize());
-    o.updateMatrix(); stitches.setMatrixAt(i, o.matrix);
+    curve.getPointAt(i / N, P);
+    P.addScaledVector(c.copy(P).sub(ctr).normalize(), 0.002).addScaledVector(n, -0.0015);
+    Q.setFromUnitVectors(Z, c.copy(n).addScaledVector(curve.getTangentAt(i / N), 0.35).normalize());
+    stitches.setMatrixAt(i, M.compose(P, Q, ONE)); stitches.setColorAt(i, thread);
   }
   wrist.add(ridge, stitches);
 }

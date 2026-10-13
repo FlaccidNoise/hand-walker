@@ -1,5 +1,5 @@
-// src/paint.js — the room's surfaces, painted once at startup onto canvases (no image
-// files). Seeded noise, so the room is the same on every load. `paintStats.ms` is the
+// src/paint.js — the room's surfaces and the hand's skin, painted once at startup onto
+// canvases (no image files). Seeded noise, so the room is the same on every load. `paintStats.ms` is the
 // total time spent here.
 import * as THREE from 'three';
 
@@ -29,6 +29,73 @@ const grad = (g, x0, y0, x1, y1, stops) => {
   return gr;
 };
 const disc = (g, x, y, r, colour) => { g.fillStyle = colour; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); };
+
+// ---- the hand's skin ----
+// One canvas in the GLB's own UV layout: colour in the left half, roughness in the right
+// (rig.js reads the right half in the skin shader, so the hand costs one texture).
+// rig.js finds WHERE things are on the skin: a mark is [kind, patch, size in mm, count],
+// and a patch is the UV at a spot plus the UV step per metre across and along the digit.
+const SKIN = 1024, SKIN_U = [0.02, 0.46];       // half size (px) · u offset and scale in a half: a gutter, so mips do not bleed
+const TONE = '#d9b29a', ROUGH = 0.6;
+const grey = (r) => { const v = Math.round(255 * r ** (1 / 2.2)); return `rgb(${v},${v},${v})`; };   // the texture is read as sRGB
+const blob = (g, x, y, r, rgb, a) => {
+  const gr = g.createRadialGradient(x, y, 0, x, y, r);
+  gr.addColorStop(0, `rgba(${rgb},${a})`); gr.addColorStop(1, `rgba(${rgb},0)`);
+  g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r);
+};
+const stroke = (g, colour, w, path) => { g.strokeStyle = colour; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); path(); g.stroke(); };
+// transverse skin folds: n arcs across a digit of half-width r, bowed away from the joint.
+// `oval` shortens the outer ones, so a knuckle's wrinkles sit in an ellipse
+const folds = (g, r, n, gap, bow, colour, w, oval = 0) => {
+  for (let k = 0; k < n; k++) {
+    const y = (k - (n - 1) / 2) * gap, h = r * Math.sqrt(1 - oval * (2 * k / (n - 1 || 1) - 1) ** 2);
+    stroke(g, colour, w, () => { g.moveTo(-h, y); g.quadraticCurveTo(0, y + bow * (y || gap * 0.3), h, y); });
+  }
+};
+// each kind paints in millimetres, x across the digit and y toward its tip. `lit` is
+// false on the roughness pass: there a kind paints greys, or nothing
+const MARK = {
+  nail(g, s, n, lit) {
+    const w = 0.44 * s, L = 0.5 * s, p = new Path2D();
+    p.roundRect(-w / 2, -L / 2, w, L, [w * 0.32, w * 0.32, w * 0.5, w * 0.5]);
+    if (!lit) { g.fillStyle = grey(0.26); g.fill(p); return; }
+    blob(g, 0, L / 2, w * 0.9, '212,124,108', 0.4);                       // the fingertip past the nail
+    g.strokeStyle = 'rgba(128,84,70,0.4)'; g.lineWidth = 0.7; g.stroke(p);                      // nail fold
+    g.fillStyle = grad(g, 0, -L / 2, 0, L / 2, [[0, '#dcaa9e'], [0.8, '#e8c1b3']]); g.fill(p);  // plate
+    g.save(); g.clip(p);
+    g.fillStyle = 'rgba(247,232,224,0.5)'; g.beginPath(); g.ellipse(0, -L / 2, w * 0.3, L * 0.2, 0, 0, 7); g.fill();    // lunula
+    g.fillStyle = '#f0e6d8'; g.beginPath(); g.ellipse(0, L / 2 - w * 0.62, w * 0.7, w * 0.5, 0, 0, 7); g.rect(-w, -L, 2 * w, 3 * L); g.fill('evenodd');   // free edge
+    g.fillStyle = 'rgba(255,255,255,0.14)'; g.beginPath(); g.ellipse(-w * 0.17, 0, w * 0.07, L * 0.36, 0, 0, 7); g.fill();
+    g.restore();
+  },
+  knuckle(g, r, n, lit) {                                    // back of an MCP
+    if (!lit) return blob(g, 0, 0, 1.6 * r, '226,226,226', 0.7);
+    blob(g, 0, 0, 2.1 * r, '198,112,100', 0.3);
+    folds(g, 0.75 * r, 4, 1.5, 0.6, 'rgba(160,112,96,0.2)', 0.4, 0.6);
+  },
+  joint(g, r, n, lit) {                                      // back of a finger joint: wrinkles on a blush
+    if (!lit) return blob(g, 0, 0, 1.3 * r, '226,226,226', 0.7);
+    blob(g, 0, 0, 1.5 * r, '196,108,96', n > 2 ? 0.36 : 0.24);
+    folds(g, 0.8 * r, n + 2, 1.05, 0.6, 'rgba(150,104,88,0.3)', 0.32, 0.7);
+  },
+  crease(g, r, n, lit) {                                     // palm side of a joint
+    if (!lit) return;
+    folds(g, 0.95 * r, n, 1.5, 0.12, 'rgba(196,138,122,0.25)', 1.5);
+    folds(g, 0.95 * r, n, 1.5, 0.12, 'rgba(150,100,86,0.42)', 0.45);
+  },
+  pad(g, r, n, lit) {
+    if (!lit) return blob(g, 0, 0, 1.2 * r, '190,190,190', 0.6);
+    blob(g, 0, 0, 1.35 * r, '216,126,110', 0.36);
+  },
+  flush(g, r, n, lit) { if (lit) blob(g, 0, 0, r, '208,124,110', 0.22); },   // the heel and ball of the palm
+  cap(g, r, n, lit) {                                        // the healed face of the stump
+    g.fillStyle = lit ? '#be9082' : grey(0.75); g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+    if (!lit) return;
+    blob(g, 0, 0, r * 0.8, '128,72,66', 0.22);
+    for (let k = 0; k < 11; k++) stroke(g, 'rgba(120,70,64,0.16)', 0.6, () => { g.moveTo(Math.cos(k * 0.571) * r * 0.12, Math.sin(k * 0.571) * r * 0.12); g.lineTo(Math.cos(k * 0.571 + 0.2) * r * 0.75, Math.sin(k * 0.571 + 0.2) * r * 0.75); });
+  },
+};
+const CREASE = [['rgba(198,140,124,0.22)', 6], ['rgba(156,106,92,0.4)', 1.6]];   // a palm line: a soft valley, then the line
 
 export const PAINT = {
   // behind everything: near-black, a little warmer toward the table
@@ -101,6 +168,32 @@ export const PAINT = {
     g.fillRect(60, 60, 120, 400);
     g.fillStyle = '#120c09'; g.fillRect(116, 60, 8, 400); g.fillRect(60, 250, 120, 8);
   }),
+
+  skin: (marks, lines) => {
+    const t = tex(2 * SKIN, SKIN, g => {
+      const r = rng(11);
+      for (const lit of [true, false]) {
+        const X = (u) => ((lit ? 0 : 0.5) + SKIN_U[0] + SKIN_U[1] * u) * 2 * SKIN;
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.fillStyle = lit ? TONE : grey(ROUGH); g.fillRect(lit ? 0 : SKIN, 0, SKIN, SKIN);
+        if (lit) for (let k = 0; k < 60; k++) blob(g, r() * SKIN, r() * SKIN, 30 + r() * 80, k % 2 ? '198,120,104' : '238,218,202', 0.07);   // mottle
+        if (lit) for (const pts of lines) for (const [colour, w] of CREASE) stroke(g, colour, w, () => {
+          g.moveTo(X(pts[0].x), pts[0].y * SKIN);
+          for (let i = 1; i < pts.length - 1; i++) g.quadraticCurveTo(X(pts[i].x), pts[i].y * SKIN,
+            X((pts[i].x + pts[i + 1].x) / 2), (pts[i].y + pts[i + 1].y) / 2 * SKIN);
+          g.lineTo(X(pts.at(-1).x), pts.at(-1).y * SKIN);
+        });
+        for (const [kind, [ax, ay, bx, by, u, v], size, n] of marks) {
+          const k = SKIN_U[1] * 2 * SKIN / 1000;
+          g.setTransform(ax * k, ay * SKIN / 1000, bx * k, by * SKIN / 1000, X(u), v * SKIN);
+          MARK[kind](g, size, n, lit);
+        }
+      }
+    });
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; t.flipY = false;                 // glTF UVs
+    t.offset.set(SKIN_U[0], 0); t.repeat.set(SKIN_U[1], 1);
+    return t;
+  },
 
   book: () => tex(256, 256, g => {
     g.fillStyle = '#4a1616'; g.fillRect(0, 0, 256, 256);
