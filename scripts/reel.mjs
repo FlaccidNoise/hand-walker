@@ -7,7 +7,8 @@
 //   { touch: [P, ...] } (fingers now on the glass: one is a touch, two a pinch, [] lifts them; needs --touch 1) |
 //   { key: 'Space' } | { type: 'text' } | { run: 'js; h = window.__hand' } | { end: true }.
 // P is [x, y] in 0..1 of the window, or a thing found through the live camera when the cue
-// fires: 'hand', a prop id ('ball'), or { on: 'hand', by: [dx, dy] } for a px offset.
+// fires: 'hand', a prop id ('ball'), { on: 'hand', by: [dx, dy] } for a px offset, or
+// { el: 'css selector' } for a control on the page.
 // Needs ffmpeg on the PATH.
 import { mkdirSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -56,6 +57,7 @@ try {
     // where a named thing is on the page right now
     const v = new h.THREE.Vector3(), box = new h.THREE.Box3();
     window.__at = (on, by = [0, 0]) => {
+      if (on.el) { const r = document.querySelector(on.el).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }
       if (on === 'hand') h.rig.digits.middle.mcp.getWorldPosition(v).add(h.rig.mount.position).multiplyScalar(0.5);
       else if (h.props.get(on)) box.setFromObject(h.props.get(on).mesh).getCenter(v);
       else throw new Error(`reel: no "${on}" to point at — have: hand, ${h.props.ids.join(', ')}`);
@@ -63,7 +65,7 @@ try {
       return [(v.x + 1) / 2 * innerWidth + by[0], (1 - v.y) / 2 * innerHeight + by[1]];
     };
   });
-  const px = (p) => Array.isArray(p) ? [p[0] * o.w, p[1] * o.h] : page.evaluate((p) => window.__at(p.on ?? p, p.by), p);
+  const px = (p) => Array.isArray(p) ? [p[0] * o.w, p[1] * o.h] : page.evaluate((p) => window.__at(p.el ? p : p.on ?? p, p.by), p);
   const cdp = await page.createCDPSession();
   let fingers = 0;
   let n = 0, next = 0, at = [0.5 * o.w, 0.5 * o.h];

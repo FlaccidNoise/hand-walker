@@ -5,6 +5,7 @@
 //   cards       one row of commands, and a palette of the rest ("more…", or type "help")
 //   talk        one text box, a hold-to-speak button (the V key), a send button on touch
 //   sound, help top right            hints   three first-run prompts, each gone once done
+//   rps         three cards (and keys R P S) while a round of rock, paper, scissors counts in
 import * as THREE from 'three';
 import * as C from './tuning.js';
 import { audio, unlockAudio } from './props.js';
@@ -23,7 +24,7 @@ const GESTURE = { wave: 'waving', yes: 'nodding', no: 'wagging a finger', idk: '
 const ERRAND = { switch: 'off to the light switch', bell: 'off to ring the bell', ball: 'after the ball', rug: 'off for a nap', piano: 'playing the piano', box: 'going home' };
 const plain = (name) => String(name).replace(/([A-Z])/g, ' $1').toLowerCase();
 const HINTS = [['floor', TOUCH ? 'tap the floor' : 'click anywhere on the floor'], ['hand', TOUCH ? 'now tap me' : 'now click me'],
-  ['prop', 'try the bell, the ball, the piano, the switch']];
+  ['prop', 'try the bell, the ball, the piano, the box']];
 const HINT_AFTER = 1.5, HINT_FOR = 20, KNOCK_AFTER = 6;      // s wall
 const CAP_GAP = 14, CAP_EASE = 0.15;                          // px above the hand as drawn · s the caption takes to follow it
 const STUMP = 0.3, PAD = 0.14;                                // u — the stump past the wrist joint · flesh past a fingertip joint
@@ -133,6 +134,16 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     else talkText.placeholder = 'ask it anything…';
   };
 
+  // ---- rock, paper, scissors: the visitor's sign goes in until the hand throws
+  const rps = $('rps'), SIGN = { KeyR: 'rock', KeyP: 'paper', KeyS: 'scissors' };
+  // the round's action, while it is the hand's business: counting in (a pick is open) or just thrown
+  const game = () => brain.st.i >= 0 ? brain.st.plan.slice(brain.st.i).find(a => a.game) : null;
+  const pick = (sign) => {
+    if (!brain.rpsPick(sign)) return notice('Too late: it has thrown.');
+    for (const b of rps.children) b.classList.toggle('on', b.dataset.pick === sign);
+  };
+  rps.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) { pick(b.dataset.pick); if (e.detail) b.blur(); } });
+
   // ---- keys that belong to the page (driving keys live in src/input.js)
   let knockIn = dev || navigator.webdriver ? 0 : KNOCK_AFTER;  // a real visitor who only watches gets a knock
   const touched = () => { knockIn = 0; $('title').classList.add('quiet'); };
@@ -140,6 +151,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   addEventListener('keydown', (e) => {
     touched();
     if (e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === 'INPUT') return;
+    if (SIGN[e.code] && game()) { e.stopImmediatePropagation(); if (!e.repeat) pick(SIGN[e.code]); return; }   // in a round R P S are signs: S does not walk
     if (e.key === '/') { e.preventDefault(); talkText.focus(); }
     else if (e.key === '?') $('help').togglePopover();
     else if (e.code === 'KeyM') setMute(!audio.muted);
@@ -178,6 +190,10 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     if (still > HINT_AFTER && hintI < HINTS.length && (hintT += dt) > HINT_FOR) { hintI++; hintT = 0; }
     if (sayT > 0 && (sayT -= dt) <= 0) said = '';
     offer();
+    // the three cards: up from the moment a round is asked for until the hand throws
+    const g = game(), open = !!g && !g.thrown;
+    if (open && rps.hidden) { for (const b of rps.children) b.classList.toggle('on', b.dataset.pick === g.pick); rps.style.bottom = `${innerHeight - $('dock').getBoundingClientRect().top + 10}px`; }
+    rps.hidden = !open;
 
     const line = caption();
     if (capDo.textContent !== line) capDo.textContent = line;   // only on change: the node is a live region
