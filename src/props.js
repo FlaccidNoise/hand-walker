@@ -115,6 +115,7 @@ export const SOUNDS = {
   dit: () => tone([[660, 1]], 0.03, 0.14, { hold: 0.1 }),    // Morse: a dot is one unit of wall time
   dah: () => tone([[660, 1]], 0.03, 0.14, { hold: 0.4 }),
   hat: () => tick(7000, 0.04, 0.12),
+  tick: () => tick(1500, 0.03, 0.1),                          // a fingertip rapped on the floor
   beat0: beat(0), beat1: beat(1), beat2: beat(2), beat3: beat(3),
   note: (hz) => tone([[hz, 1], [hz * 2, 0.25], [hz * 3, 0.08]], 1.2, 0.2),
   step: (f, speed) => tick(STEP_HZ[f] ?? 1400, 0.03, 0.05 + 0.05 * Math.min(speed / 2, 1)),
@@ -170,7 +171,7 @@ export function makeProps({ scene, lights }) {
   // `plan`: what the hand does once it stands at `anchor` facing `facing` (world heading, rad)
   const P = {
     switch: { label: 'light switch', mesh: plate, anchor: { x: 2.4, z: -4.55 }, facing: Math.PI / 2,
-      plan: () => [{ do: 'jump' }, { do: 'wait', s: 0.5 }, { do: 'gesture', name: state.lights ? 'thumbsUp' : 'thinking' }] },
+      plan: () => [{ do: 'jump' }, { do: 'wait', s: 0.5 }, { do: 'gesture', name: state.lights ? 'thinking' : 'thumbsUp' }] },
     bell: { label: 'bell', mesh: bellG, anchor: { x: -3.2, z: 3.2 }, plan: () => [{ do: 'jump' }] },
     ball: { label: 'ball', mesh: ballM, get anchor() { return { x: ball.x, z: ball.z }; }, speed: C.SPEED.scuttle, plan: () => [] },
     rug: { label: 'rug', mesh: rug, anchor: { x: -3.5, z: -3.5 }, plan: () => [{ do: 'gesture', name: 'sleep' }] },

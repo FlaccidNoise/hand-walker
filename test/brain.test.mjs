@@ -5,7 +5,7 @@ import { makeBrain } from '../src/brain.js';
 import * as C from '../src/tuning.js';
 
 // a sim that moves its body at the commanded velocity and stops dead on zero
-function mock() {
+function mock(camera = null) {
   const pos = { x: 0, y: 0, z: 0 };
   const s = { heading: 0, speed: 0, planted: 5, airborne: false, gesture: null, pivotTarget: null, time: 0, lastInput: 0 };
   const cmd = { x: 0, z: 0 }, calls = [];
@@ -16,7 +16,7 @@ function mock() {
     jump() { calls.push(['jump']); },
     pivot(deg) { calls.push(['pivot', deg]); return true; },
   };
-  const brain = makeBrain(sim, { mount: { position: pos } }, null);
+  const brain = makeBrain(sim, { mount: { position: pos } }, camera);
   const step = (secs) => {
     for (let t = 0; t < secs; t += 0.01) {
       pos.x += cmd.x * 0.01; pos.z += cmd.z * 0.01;
@@ -112,7 +112,7 @@ test('pokes escalate from a giggle to a sulk, and are forgotten after a quiet sp
   const first = () => { const a = m.brain.st.plan[0]; return a.name ?? a.do; };
   const seen = [];
   for (let i = 0; i < 5; i++) { m.brain.poke(); seen.push(first()); m.step(0.6); }
-  assert.deepEqual(seen, ['laugh', 'jump', 'no', 'tap', 'flipBird']);
+  assert.deepEqual(seen, ['laugh', 'jump', 'shake', 'tap', 'flipBird']);
   m.brain.poke(); m.step(0.6); m.brain.poke();
   assert.equal(first(), 'jump', 'two quick pokes: the second startles');
   m.brain.cancel(); m.step(C.POKE_FORGET + 1);
@@ -151,4 +151,22 @@ test('a gesture the sim cannot start yet is tried again, and an unknown one fail
   m.brain.command([{ do: 'gesture', name: 'moonwalk' }], { source: 'key' });
   m.step(0.05);
   assert.match(m.brain.st.detail, /unknown gesture "moonwalk"/);
+});
+
+test('a sign turns to the viewer first, a body gesture does not', () => {
+  const m = mock({ position: { x: -8, y: 5, z: 0 } });       // the viewer is behind the hand
+  m.brain.command([{ do: 'gesture', name: 'thumbsUp' }], { source: 'key' });
+  assert.deepEqual(m.brain.st.plan.map(a => a.do), ['face', 'gesture']);
+  m.step(0.5);
+  assert.equal(m.calls[0][0], 'pivot', 'it turns before it signs');
+  assert.ok(Math.abs(Math.abs(m.calls[0][1]) - 180) < 1, `turned ${m.calls[0][1]}°`);
+  m.brain.command([{ do: 'gesture', name: 'yes' }], { source: 'key' });
+  assert.deepEqual(m.brain.st.plan.map(a => a.do), ['gesture']);
+});
+
+test('a sign made while already facing the viewer starts at once', () => {
+  const m = mock({ position: { x: 8, y: 5, z: 1 } });
+  m.brain.command([{ do: 'gesture', name: 'thumbsUp' }], { source: 'key' });
+  m.step(0.1);
+  assert.deepEqual(m.calls.map(c => c[0]), ['gesture']);
 });

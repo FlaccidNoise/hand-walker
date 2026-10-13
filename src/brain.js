@@ -112,11 +112,11 @@ export function makeBrain(sim, rig, camera, props = null) {
       }
       return ACTIONS.walk(a, dt);                        // reuses walk wholesale
     },
-    face(a) {                                            // turn to a WORLD heading (props have a front)
-      if (!a.started) {
+    face(a) {                                            // turn to a WORLD heading (props have a front),
+      if (!a.started) {                                  // or to the viewer, from where the hand stands then
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;
-        const d = M.wrapAngle(a.heading - sim.s.heading);
-        if (Math.abs(d) < 0.06) return DONE;
+        const d = M.wrapAngle((a.viewer ? toViewer() : a.heading) - sim.s.heading);
+        if (Math.abs(d) < (a.within ?? 0.06)) return DONE;
         if (sim.pivot(d * 180 / Math.PI)) a.started = true;
         return RUNNING;
       }
@@ -144,13 +144,14 @@ export function makeBrain(sim, rig, camera, props = null) {
 
   // routines: named bits made of plain actions. {do:'routine',name} expands in run().
   const FRONT = { x: 3.6, z: 3.6 };                      // the open corner nearest the viewer
-  const toViewer = () => camera ? Math.atan2(-(camera.position.z - FRONT.z), camera.position.x - FRONT.x) : -Math.PI / 4;
+  const toViewer = (p = body.position) => camera ? Math.atan2(-(camera.position.z - p.z), camera.position.x - p.x) : -Math.PI / 4;
+  const FACE_WITHIN = 0.6;                               // rad off the viewer at which a sign still reads
   const ROUTINES = {
     // a hop-turn is the spin: dance, spin, dance, spin back, bow
     dance: () => [{ do: 'gesture', name: 'dance' }, { do: 'turn', deg: 180 }, { do: 'gesture', name: 'dance' },
       { do: 'turn', deg: 180 }, { do: 'jump' }, { do: 'gesture', name: 'bow' }],
     // come to the glass, rap on it, and wave at whoever is there
-    knock: () => [{ do: 'walkTo', ...FRONT, speed: C.SPEED.scuttle }, { do: 'face', heading: toViewer() },
+    knock: () => [{ do: 'walkTo', ...FRONT, speed: C.SPEED.scuttle }, { do: 'face', viewer: true },
       { do: 'gesture', name: 'knock' }, { do: 'wait', s: 0.4 }, { do: 'gesture', name: 'wave' }],
     // offended: one rude sign, then off to the far corner to sulk with its back turned
     sulk: () => [{ do: 'gesture', name: 'flipBird' }, { do: 'walkTo', x: -4, z: -4, speed: C.SPEED.scuttle },
@@ -176,6 +177,9 @@ export function makeBrain(sim, rig, camera, props = null) {
       return [...go, ...p.plan()];
     });
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
+    // a sign is made AT someone (`face` in its def): turn to the viewer first, unless nearly there
+    if (camera) plan = plan.flatMap(a => a.do === 'gesture' && GESTURES[a.name]?.face
+      ? [{ do: 'face', viewer: true, within: FACE_WITHIN }, a] : [a]);
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
     st.i = 0;
@@ -204,7 +208,7 @@ export function makeBrain(sim, rig, camera, props = null) {
 
   // ---- poked (a click on the hand itself): ticklish, then startled, then cross.
   // The count decays, so an occasional poke is always a giggle.
-  const POKES = [[{ do: 'gesture', name: 'laugh' }], [{ do: 'jump' }], [{ do: 'gesture', name: 'no' }],
+  const POKES = [[{ do: 'gesture', name: 'laugh' }], [{ do: 'jump' }], [{ do: 'gesture', name: 'shake' }],
     [{ do: 'gesture', name: 'tap' }], [{ do: 'routine', name: 'sulk' }]];
   let pokes = 0, pokedAt = -1e9;
   function poke() {
@@ -245,7 +249,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     { name: 'signalling', w: 1, plan: () => [{ do: 'morse', text: 'sos' }, { do: 'gesture', name: 'point' }] },
     { name: 'lights out', w: 1, plan: () => [{ do: 'use', target: 'switch' }, { do: 'use', target: 'rug' }, { do: 'use', target: 'switch' }] },
   ];
-  let lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER;
+  let lastUserAt = 0, nextBehaviorAt = C.BEHAVE_AFTER, lastBehavior = null;
   function behave(name) {                                 // also a headless test hook
     const b = BEHAVIORS.find(x => x.name === name) ?? BEHAVIORS[0];
     return run(b.plan(), b.name);
@@ -260,8 +264,9 @@ export function makeBrain(sim, rig, camera, props = null) {
     // the micro-idles start.
     if (sim.s.time - sim.s.lastInput < C.BEHAVE_SIM_QUIET) return;
     if (bClock - lastUserAt < C.BEHAVE_AFTER || bClock < nextBehaviorAt) return;
-    let r = Math.random() * BEHAVIORS.reduce((a, b) => a + b.w, 0);
-    const b = BEHAVIORS.find(x => (r -= x.w) <= 0) ?? BEHAVIORS[0];
+    const pool = BEHAVIORS.filter(x => x !== lastBehavior);  // never the same bit twice running
+    let r = Math.random() * pool.reduce((a, b) => a + b.w, 0);
+    const b = lastBehavior = pool.find(x => (r -= x.w) <= 0) ?? pool[0];
     run(b.plan(), b.name);
     nextBehaviorAt = bClock + C.BEHAVE_GAP * rnd(0.7, 1.5);
   }

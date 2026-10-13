@@ -10,10 +10,12 @@
 // hover: true (thumbsUp/thumbsDown/flipBird) lifts the WHOLE hand off the ground —
 // every digit needs a `digits[f]` entry (no digit falls through to stance/tuck), and
 // `body.lift` is a direct world-Y offset (bypasses the capped-force stance spring,
-// which can't produce a clean full liftoff — see main.js's `hovering()`). Large body
-// reorientation for a hover MUST use `roll`, not `pitch`: body pose is applied as
-// Euler order YZX (roll, heading, pitch) — pitch is the MIDDLE axis, which gimbal-
-// locks at ±90°; roll is the last axis and doesn't. heading always stays 0 (below).
+// which can't produce a clean full liftoff — see main.js's `hovering()`). Body pose is
+// applied as Euler order YZX (roll, heading, pitch): pitch is the MIDDLE axis and gimbal-
+// locks at ±90°, roll is the last axis and doesn't. So TOTAL body pitch (the -0.6 posture
+// plus the track) stays within ±1.2 rad, and anything bigger goes on `roll`. The perch
+// peaks at +1.1 rad total (63°, measured on mount.rotation.z). heading always stays 0 (below).
+// `face: true` = a sign made AT someone: the brain turns the hand to the viewer first.
 //
 // Authoring rules (refuted approaches — do not rediscover):
 // - NO body heading track, ever: ±0.25 rad heading with world-pinned feet drives
@@ -49,6 +51,11 @@ function osc(cycles, amp, env) {
   return keys;
 }
 
+// n dips to `a` and back between u0 and u1, level outside: a nod or a chuckle is dips with
+// a hard stop between them, not a sine
+const dips = (n, a, u0, u1) => [[0, 0],
+  ...Array.from({ length: 2 * n + 1 }, (_, i) => [u0 + (u1 - u0) * i / (2 * n), i % 2 ? a : 0]), [1, 0]];
+
 const TAP_LIFT = -0.35;                      // rad of MCP extension that lifts a tapping digit off its rest
 const CURL = { yaw: 0, mcp: 0, pip: 0.5 };   // lifted part-curled base (the "no" point)
 const WAVE_CURL = { yaw: 0, mcp: -0.25, pip: 0.65 };
@@ -70,7 +77,7 @@ const hoverDigits = (extended, pose = CURL, thumb = FIST) => Object.fromEntries(
 // the on-edge presentation every sign shares: lift, roll thumb-up, hold, roll back, set down
 const SIGN_ROLL = [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]];
 const sign = (extended, thumb = THUMB_TUCK) => ({
-  dur: 1.8, hover: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL }, digits: hoverDigits(extended, CURL, thumb),
+  dur: 1.8, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL }, digits: hoverDigits(extended, CURL, thumb),
 });
 // finger snap: thumb and middle meet, the middle whips into the palm, and the sound
 // lands on that frame (`cue` = [gesture u, name], played by main.js). There is no
@@ -118,7 +125,15 @@ const FLARE = { yaw: 0, mcp: -0.3, pip: 0.55 };
 const THROW = { yaw: 0, mcp: -0.5, pip: 0.6 };   // a digit thrown high in the dance
 
 export const GESTURES = {
-  yes: { dur: 1.1, body: { pitch: osc(2, 0.16) } },
+  // nod: a small wind-up, two dips of the stump, a hard stop. The body sinks with the pitch
+  // or the planted digits cannot follow (osc(2, 0.16) with no sink moved the stump 7 px on
+  // screen: nothing). Measured: 0 re-steps, 5 planted
+  yes: { dur: 1.0, body: {
+    pitch:  [[0, 0], [0.1, -0.05], [0.28, 0.26], [0.42, 0.06], [0.58, 0.26], [0.8, 0], [1, 0]],
+    height: [[0, 0], [0.1, 0.02], [0.28, -0.14], [0.42, -0.03], [0.58, -0.14], [0.8, 0], [1, 0]] } },
+  // cross: the whole hand shakes itself. Roll holds on planted digits to 0.3 rad (scanned);
+  // at 0.22 the twist did not read from the app camera
+  shake: { dur: 0.9, body: { roll: [[0, 0], [0.15, 0.28], [0.4, -0.28], [0.65, 0.28], [0.85, 0], [1, 0]] } },
   no:  { dur: 1.3, digits: { index: { base: CURL, yaw: osc(3, 0.28) } } },
   // shrug: snappy rise+pitch-back (fast rise, slow settle), splayed fingers, thumb
   // flares out and re-plants during the settle
@@ -142,8 +157,10 @@ export const GESTURES = {
       pinky:  { base: WAVE_CURL, pip: WAVE_BOB, win: [0.45, 0.85] },
     },
   },
-  // giggle: quick body bounces with a pitch jiggle
-  laugh: { dur: 1.3, body: { height: osc(4, 0.05), pitch: osc(4, 0.045) } },
+  // chuckle: five dips with a sway under them (a 0.05 sine bounce was 5 px on screen).
+  // Measured: 0 re-steps, 5 planted
+  laugh: { dur: 1.3, body: { height: dips(5, -0.11, 0.08, 0.8), pitch: dips(5, 0.1, 0.08, 0.8),
+    roll: [[0, 0], [0.2, 0.07], [0.5, -0.07], [0.8, 0.05], [1, 0]] } },
   // a deep bow and hold: the stump (the tall stance's "head") comes down level while
   // the body sinks (positive pitch = stump-down — opposite of idk's rear-back). Pitch
   // 0.35 is past what the planted digits hold: they re-step (scanned: 0.3 holds, err 0.039)
@@ -154,11 +171,14 @@ export const GESTURES = {
       height: [[0, 0], [0.3, -0.18], [0.65, -0.18], [1, 0]],
     },
   },
-  // index raised to a steady forward point, small emphasis bobs
+  // point: lean in and level the palm so the index can reach level. The MCP stops at
+  // -0.55 and the palm stands 34° nose-down: on the standing posture an index at
+  // mcp -0.35 still pointed 30° into the floor (measured). 0 re-steps
   point: {
-    dur: 1.2,
-    digits: { index: { base: { yaw: 0, mcp: -0.35, pip: 0.5 },
-      mcp: [[0, 0], [0.3, -0.08], [0.5, 0.02], [0.7, -0.06], [1, 0]] } },
+    dur: 1.6,
+    body: { pitch: [[0, 0], [0.12, -0.06], [0.28, 0.24], [0.75, 0.24], [1, 0]],
+      height: [[0, 0], [0.12, 0.03], [0.28, -0.13], [0.75, -0.13], [1, 0]] },
+    digits: { index: { base: { yaw: 0, mcp: -0.55, pip: 0.5 }, win: [0.1, 0.8] } },
   },
   // come here: index curls twice
   beckon: {
@@ -179,23 +199,26 @@ export const GESTURES = {
   // tip on the floor, so every down-stroke strikes exactly, at any posture
   tap: {
     dur: 1.3,
+    body: { pitch: [[0, 0], [0.08, 0.12], [0.9, 0.12], [1, 0]], height: [[0, 0], [0.08, -0.06], [0.9, -0.06], [1, 0]] },
+    cue: [0.16, 0.38, 0.6, 0.82].map(u => [u, 'tick']),
     digits: { index: { base: 'rest',
       mcp: [[0, 0], [0.08, TAP_LIFT], [0.16, 0], [0.22, 0], [0.3, TAP_LIFT],
         [0.38, 0], [0.44, 0], [0.52, TAP_LIFT], [0.6, 0], [0.66, 0],
         [0.74, TAP_LIFT], [0.82, 0], [0.88, 0], [1, 0]] } },
   },
-  // hover: full liftoff, fist + one extended digit, big body roll (thumb swings
-  // from its neutral lateral position to point up/down)
+  // hover: full liftoff, fist + thumb. The palm levels (pitch) and rolls past its edge:
+  // at roll -1.4 on the standing posture the thumb pointed at the viewer, never up (filmed)
   thumbsUp: {
-    dur: 1.8, hover: true,
-    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]] },
+    dur: 1.8, hover: true, face: true,
+    body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -2.6], [0.55, -2.6], [0.7, 0], [1, 0]],
+      pitch: [[0, 0], [0.22, 0.6], [0.55, 0.6], [0.7, 0], [1, 0]] },
     digits: hoverDigits('thumb'),
   },
   // the thumb points DOWN: the wrist must ride a thumb-length higher than the other
   // hovers, and stay up until the roll is back — at HOVER_LIFT the thumb speared the
   // floor and the ground constraint snapped it 1.3-1.6 u in one step, twice per play
   thumbsDown: {
-    dur: 1.8, hover: true,
+    dur: 1.8, hover: true, face: true,
     body: { lift: [[0, 0], [0.2, 0.8], [0.85, 0.8], [1, 0]],
       roll: [[0, 0], [0.12, 0], [0.3, 1.4], [0.55, 1.4], [0.7, 0], [1, 0]] },
     digits: hoverDigits('thumb'),
@@ -204,7 +227,7 @@ export const GESTURES = {
   // rejected in-sim, the whole hand read as bunched to one side instead of a clean
   // one-finger-up silhouette; roll reads cleanly since it already works for thumb)
   flipBird: {
-    dur: 1.8, hover: true,
+    dur: 1.8, hover: true, face: true,
     body: { lift: HOVER_LIFT, roll: [[0, 0], [0.22, -1.4], [0.55, -1.4], [0.7, 0], [1, 0]] },
     digits: hoverDigits('middle', CURL, THUMB_TUCK),
   },
@@ -213,10 +236,10 @@ export const GESTURES = {
   fingerGun: sign(['index', 'thumb'], CURL),
   highFive: sign(['thumb', 'index', 'middle', 'ring', 'pinky']),
   // whip keys are in the digit window's own 0..1 (HOVER_WIN = 0.7 of the gesture)
-  snap: { dur: 1.4, hover: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
+  snap: { dur: 1.4, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
     digits: snapDigits([0.62]), cue: [[0.62 * 0.7, 'snap']] },
   // two snaps: Thing's remote. The second one works the light switch from anywhere.
-  doubleSnap: { dur: 1.8, hover: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
+  doubleSnap: { dur: 1.8, hover: true, face: true, body: { lift: HOVER_LIFT, roll: SIGN_ROLL },
     digits: snapDigits([0.5, 0.78]), cue: [[0.5 * 0.7, 'snap'], [0.78 * 0.7, 'snap'], [0.78 * 0.7, 'remote']] },
   // rap on the glass: the index cocks back and knocks three times. The knock sound and
   // a camera shake land on each strike (cues, played by main.js)
@@ -282,14 +305,14 @@ const DRUM_BASE = 'rest';
 const DRUM_STROKE = [[0, 0], [0.3, TAP_LIFT], [0.55, 0], [0.7, 0], [1, 0]];
 const STRETCH = { yaw: 0, mcp: -0.35, pip: 0.5 };
 export const IDLES = {
-  breathe: { w: 4, dur: 3.5, body: { height: osc(2, 0.015) } },
-  shift:   { w: 2, dur: 2.8, body: { roll: osc(1, 0.06) } },
+  // (breathe and shift are gone: 2 px and under 1 px on screen. Stillness is the idle.)
+  // one digit up at a time: with the windows overlapped only two stayed planted (measured)
   drum: {
     w: 2, dur: 1.5,
     digits: {
-      index:  { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0, 0.35] },
-      middle: { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.22, 0.57] },
-      ring:   { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.44, 0.79] },
+      index:  { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0, 0.3] },
+      middle: { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.3, 0.6] },
+      ring:   { base: DRUM_BASE, mcp: DRUM_STROKE, win: [0.6, 0.9] },
     },
   },
   // cat stretch: all four fingers extend forward while the body rears slightly
