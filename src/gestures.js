@@ -290,10 +290,13 @@ export const GESTURES = {
         [0.74, TAP_LIFT], [0.82, 0], [0.88, 0], [1, 0]] } },
   },
   // hover: full liftoff, fist + thumb. The palm levels (pitch) and rolls past its edge:
-  // at roll -1.4 on the standing posture the thumb pointed at the viewer, never up (filmed)
+  // at roll -1.4 on the standing posture the thumb pointed at the viewer, never up (filmed).
+  // Pitch 1.2 stands the thumb plumb (world 0.09, 0.99, 0.06): on screen it is within 6° of
+  // vertical from any heading the face turn leaves (0.6 rad of slack). At pitch 0.6 it
+  // leaned 40° toward the viewer and showed 30° off vertical from the edge of that slack
   thumbsUp: {
     dur: 1.8, hover: true, face: true,
-    body: { lift: HOVER_LIFT, roll: THUMB_UP, pitch: LEVEL_PALM },
+    body: { lift: HOVER_LIFT, roll: THUMB_UP, pitch: [[0, 0], [0.22, 1.2], [0.55, 1.2], [0.7, 0], [1, 0]] },
     digits: hoverDigits('thumb'),
   },
   // the thumb points DOWN: the wrist must ride a thumb-length higher than the other
@@ -302,7 +305,9 @@ export const GESTURES = {
   thumbsDown: {
     dur: 1.8, hover: true, face: true,
     body: { lift: [[0, 0], [0.2, 0.8], [0.85, 0.8], [1, 0]],
-      roll: [[0, 0], [0.12, 0], [0.3, 1.4], [0.55, 1.4], [0.7, 0], [1, 0]] },
+      // roll 0.6 hangs the thumb plumb (world 0.08, -0.99, 0.08: within 4° of straight down
+      // on screen). At 1.4 it pointed 33° off
+      roll: [[0, 0], [0.12, 0], [0.3, 0.6], [0.55, 0.6], [0.7, 0], [1, 0]] },
     digits: hoverDigits('thumb'),
   },
   flipBird: perchSign(['middle']),
