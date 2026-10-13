@@ -316,10 +316,14 @@ const SCENARIOS = {
   // the click-to-walk path: four brain walkTo legs with 90° course changes (on the
   // flat side of the room: the step at (0, 2.4) is a terrain test, not a gait one)
   async clickWalk(H) {
+    let berr = null;                                         // a brain error arrives through onsay
+    const page = H.brain.st.onsay;
+    H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
     H.brain.run([{ do: 'walkTo', x: 3, z: 0, speed: 0.8 }, { do: 'walkTo', x: 3, z: -3, speed: 0.8 },
       { do: 'walkTo', x: 0, z: -3, speed: 0.8 }, { do: 'walkTo', x: 0, z: 0, speed: 0.8 }]);
     for (let i = 0; i < 400 && H.brain.st.i >= 0; i++) await sleep(100);
-    if (H.brain.st.status === 'error') throw new Error('clickWalk: brain ' + H.brain.st.detail);
+    H.brain.st.onsay = page;
+    if (berr) throw new Error('clickWalk: brain ' + berr);
   },
   // walk, stop, hold: the hand must halt fast, finish IN its stance, and then be still
   async stop(H) {

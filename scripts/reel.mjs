@@ -61,7 +61,7 @@ try {
         at = to;
         if (a.click) await page.mouse.click(...to);
       } else if (a.key) await page.keyboard.press(a.key);
-      else if (a.type) { await page.focus('#talkText'); await page.keyboard.type(a.type); await page.keyboard.press('Enter'); }
+      else if (a.type) { await page.focus('#talkText'); await page.keyboard.type(a.type); await page.keyboard.press('Enter'); await page.evaluate(() => document.activeElement.blur()); }   // keys drive again
       else if (a.run) await page.evaluate(`(() => { const h = window.__hand; ${a.run} })()`);
     }
     await page.evaluate((sub) => {

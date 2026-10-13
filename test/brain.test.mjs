@@ -5,6 +5,7 @@ import { makeBrain } from '../src/brain.js';
 import * as C from '../src/tuning.js';
 
 // a sim that moves its body at the commanded velocity and stops dead on zero
+const props = { ids: ['bell'], get: (id) => id === 'bell' ? { anchor: { x: 2, z: 0 }, facing: 0, plan: () => [{ do: 'jump' }] } : null, describe: () => '' };
 function mock(camera = null) {
   const pos = { x: 0, y: 0, z: 0 };
   const s = { heading: 0, speed: 0, planted: 5, airborne: false, gesture: null, pivotTarget: null, time: 0, lastInput: 0 };
@@ -16,7 +17,9 @@ function mock(camera = null) {
     jump() { calls.push(['jump']); },
     pivot(deg) { calls.push(['pivot', deg]); return true; },
   };
-  const brain = makeBrain(sim, { mount: { position: pos } }, camera);
+  const brain = makeBrain(sim, { mount: { position: pos } }, camera, props);
+  const said = [];                                           // [text, kind] the brain reported
+  brain.st.onsay = (text, kind) => said.push([text, kind]);
   const step = (secs) => {
     for (let t = 0; t < secs; t += 0.01) {
       pos.x += cmd.x * 0.01; pos.z += cmd.z * 0.01;
@@ -25,7 +28,7 @@ function mock(camera = null) {
       brain.tick(0.01);
     }
   };
-  return { sim, brain, pos, calls, step };
+  return { sim, brain, pos, calls, step, said };
 }
 
 test('a click plan runs, walks to the target and stops there', () => {
@@ -59,15 +62,9 @@ test('an unknown source or action fails loudly', () => {
   const m = mock();
   assert.throws(() => m.brain.command([{ do: 'jump' }], { source: 'gamepad' }), /unknown source/);
   assert.equal(m.brain.command([{ do: 'teleport' }], { source: 'click' }), false);
-  assert.equal(m.brain.st.status, 'error');
-  assert.match(m.brain.st.detail, /unknown action "teleport"/);
-});
-
-test('an error status clears to idle after STATUS_HOLD', () => {
-  const m = mock();
-  m.brain.command([{ do: 'teleport' }], { source: 'click' });
-  m.step(C.STATUS_HOLD + 0.2);
-  assert.equal(m.brain.st.status, 'idle');
+  assert.equal(m.brain.st.status, 'idle', 'an error is reported, not a status to live in');
+  assert.equal(m.said.at(-1)[1], 'error');
+  assert.match(m.said.at(-1)[0], /unknown action "teleport"/);
 });
 
 test('a stale LLM reply is dropped when a newer ask is in flight', async () => {
@@ -96,11 +93,14 @@ test('a plain command is obeyed by rules with no LLM call', async () => {
 test('with no LLM reachable, an unknown request shrugs and says what works', async () => {
   const m = mock();
   globalThis.fetch = async () => ({ ok: false, json: async () => { throw new SyntaxError('Unexpected token <'); } });
-  await m.brain.ask('recite a poem');
-  assert.equal(m.brain.st.status, 'saying');
-  assert.match(m.brain.st.detail, /No language model/);
+  assert.deepEqual(await m.brain.ask('recite a poem'), { lost: true });
+  assert.equal(m.brain.st.status, 'acting', 'the shrug');
+  assert.equal(m.said.at(-1)[1], 'notice');
+  assert.match(m.said.at(-1)[0], /simple words/);
   m.step(0.05);
   assert.deepEqual(m.calls.at(-1), ['gesture', 'idk']);
+  m.step(0.5);
+  assert.equal(m.brain.st.status, 'idle');
   let called = 0; globalThis.fetch = () => { called++; return new Promise(() => {}); };
   await m.brain.ask('sing an aria');                          // does not ask the dead endpoint again
   assert.equal(called, 0);
@@ -125,7 +125,7 @@ test('a routine expands to plain actions, and an unknown one fails loudly', () =
   assert.equal(m.brain.command([{ do: 'routine', name: 'dance' }], { source: 'click' }), true);
   assert.ok(m.brain.st.plan.length > 3 && m.brain.st.plan.every(a => a.do !== 'routine'));
   assert.equal(m.brain.command([{ do: 'routine', name: 'moonwalk' }], { source: 'click' }), false);
-  assert.match(m.brain.st.detail, /unknown routine "moonwalk" — have: dance/);
+  assert.match(m.said.at(-1)[0], /unknown routine "moonwalk" — have: dance/);
 });
 
 test('morse taps the asked text, and text with no code fails loudly', () => {
@@ -135,7 +135,7 @@ test('morse taps the asked text, and text with no code fails loudly', () => {
   assert.deepEqual(m.calls.at(-1), ['gesture', 'morse']);
   m.brain.command([{ do: 'morse', text: '!!' }], { source: 'voice' });
   m.step(0.05);
-  assert.match(m.brain.st.detail, /no Morse code|has a Morse code/);
+  assert.match(m.said.at(-1)[0], /no Morse code|has a Morse code/);
 });
 
 test('a gesture the sim cannot start yet is tried again, and an unknown one fails loudly', () => {
@@ -150,7 +150,119 @@ test('a gesture the sim cannot start yet is tried again, and an unknown one fail
   assert.deepEqual(m.calls.at(-1), ['gesture', 'wave']);
   m.brain.command([{ do: 'gesture', name: 'moonwalk' }], { source: 'key' });
   m.step(0.05);
-  assert.match(m.brain.st.detail, /unknown gesture "moonwalk"/);
+  assert.match(m.said.at(-1)[0], /unknown gesture "moonwalk"/);
+  assert.equal(m.brain.st.status, 'idle');
+});
+
+test('a gesture that replaces a walk stops the walk first', () => {
+  const m = mock();
+  m.brain.command([{ do: 'walkTo', x: 4, z: 0, speed: 1.8 }], { source: 'click' });
+  m.step(0.5);
+  m.brain.command([{ do: 'gesture', name: 'wave' }], { source: 'key' });
+  assert.deepEqual(m.calls.at(-1), ['walk', 0, 0], 'the walk command is zeroed at once');
+  m.step(0.1);
+  assert.deepEqual(m.calls.at(-1), ['gesture', 'wave']);
+  assert.ok(m.pos.x < 1.2, `stayed put: x=${m.pos.x}`);
+});
+
+test('a walk that replaces a walk is not zeroed in between', () => {
+  const m = mock();
+  m.brain.command([{ do: 'walkTo', x: 4, z: 0 }], { source: 'key' });
+  m.step(0.2);
+  const n = m.calls.length;
+  m.brain.command([{ do: 'walkTo', x: 4, z: 1 }], { source: 'key' });
+  assert.equal(m.calls.length, n, 'no stop between two carrots');
+});
+
+test('a turn the sim cannot start yet is tried again', () => {
+  const m = mock();
+  let busy = true;
+  const pivot = m.sim.pivot;
+  m.sim.pivot = (deg) => busy ? false : pivot(deg);
+  m.brain.command([{ do: 'turn', deg: 45 }], { source: 'key' });
+  m.step(0.3);
+  assert.equal(m.brain.st.status, 'acting', 'still waiting, not an error');
+  busy = false; m.step(0.05);
+  assert.deepEqual(m.calls.at(-1), ['pivot', 45]);
+});
+
+test('a poke that is outranked does not count', () => {
+  const m = mock();
+  m.brain.command([{ do: 'walkTo', x: 4, z: 0 }], { source: 'key' });
+  m.step(0.1);
+  assert.equal(m.brain.poke(), false);
+  assert.equal(m.brain.poke(), false);
+  m.brain.cancel();
+  assert.equal(m.brain.poke(), true);
+  assert.equal(m.brain.st.plan[0].name, 'laugh');
+});
+
+test('a used prop tags every action of the errand with `for`', () => {
+  const m = mock();
+  m.brain.command([{ do: 'use', target: 'bell' }], { source: 'click' });
+  assert.deepEqual(m.brain.st.plan.map(a => [a.do, a.for]), [['walkTo', 'bell'], ['face', 'bell'], ['jump', 'bell']]);
+});
+
+// every way out of 'thinking' must land on idle or acting: idle behaviors and the cursor wait on it
+const llm = (reply) => { globalThis.fetch = async () => reply; };
+const json = (o, ok = true) => ({ ok, json: async () => o });
+test('an LLM reply with words and a plan says the words and runs the plan', async () => {
+  const m = mock(); llm(json({ text: '{"say":"Right then","plan":[{"do":"jump"}]}' }));
+  m.brain.mute(true);
+  await m.brain.ask('are you well');
+  assert.deepEqual(m.said.at(-1), ['Right then', 'say']);
+  assert.equal(m.brain.st.status, 'acting');
+  delete globalThis.fetch;
+});
+
+test('an LLM reply with words only says them and goes idle', async () => {
+  const m = mock(); llm(json({ text: '{"say":"Quite"}' }));
+  m.brain.mute(true);
+  await m.brain.ask('are you well');
+  assert.deepEqual(m.said.at(-1), ['Quite', 'say']);
+  assert.equal(m.brain.st.status, 'idle');
+  delete globalThis.fetch;
+});
+
+test('an empty LLM reply and a proxy error are notices, and the brain goes idle', async () => {
+  const m = mock(); llm(json({ text: '{}' }));
+  await m.brain.ask('are you well');
+  assert.equal(m.said.at(-1)[1], 'notice');
+  assert.equal(m.brain.st.status, 'idle');
+  llm(json({ error: 'GEMINI_API_KEY not set' }, false));
+  await m.brain.ask('are you well');
+  assert.match(m.said.at(-1)[0], /not answering/);
+  assert.equal(m.brain.st.status, 'idle');
+  delete globalThis.fetch;
+});
+
+test('a reply that lands while a key holds the controls is dropped whole', async () => {
+  const m = mock(); let land;
+  globalThis.fetch = () => new Promise(res => { land = res; });
+  const asked = m.brain.ask('are you well');
+  m.brain.command([{ do: 'walkTo', x: 4, z: 0 }], { source: 'key' });
+  m.step(0.1);
+  land(json({ text: '{"say":"Right then","plan":[{"do":"jump"}]}' }));
+  assert.equal(await asked, null);
+  assert.equal(m.said.length, 0, 'no words without the deed');
+  assert.equal(m.brain.st.plan[0].do, 'walkTo');
+  delete globalThis.fetch;
+});
+
+test('a question the rules answer with "stop" does not leave the brain thinking', async () => {
+  const m = mock();
+  globalThis.fetch = async () => ({ ok: false, json: async () => { throw new SyntaxError('<'); } });
+  await m.brain.ask('can you stop?');
+  assert.equal(m.brain.st.status, 'idle');
+  delete globalThis.fetch;
+});
+
+test('the model download reports through onload, never through the status', async () => {
+  const m = mock(), seen = [];
+  m.brain.st.onload = (o) => seen.push(o.state);
+  assert.equal(await m.brain.loadLocal(), false, 'node has no WebGPU');
+  assert.deepEqual(seen, ['error']);
+  assert.equal(m.brain.st.status, 'idle');
 });
 
 test('a sign turns to the viewer first, a body gesture does not', () => {
