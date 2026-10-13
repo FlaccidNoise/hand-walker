@@ -35,7 +35,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   const pal = $('pal'), talkText = $('talkText');
   const ask = (text) => {
     if (isHelp(text)) return open(pal);
-    brain.ask(text).then((r) => { if (r && r.lost) open(pal); })
+    brain.ask(text).then((r) => { if (r && r.lost) { offer(); open(pal); } })
       .catch((e) => { console.error('[ui] brain.ask threw: this is a bug in src/brain.js, not something the visitor did.', e); notice('I could not do that.'); });
   };
   pal.addEventListener('beforetoggle', () => { pal.style.bottom = `${innerHeight - $('dock').getBoundingClientRect().top + 8}px`; });
@@ -117,7 +117,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   }
 
   // ---- the in-browser model: asked for by a button (it is the consent), shown as a bar
-  const brainBtn = $('brainBtn');
+  const brainBtn = $('brainBtn'), offer = () => { $('brainRow').hidden = !brain.needsLocal; };
   brainBtn.addEventListener('click', () => brain.loadLocal());
   brain.st.onload = ({ state, pct }) => {
     brainBtn.hidden = state === 'loading'; $('brainLoad').hidden = state !== 'loading';
@@ -150,7 +150,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     if (listening) return heard ? `heard “${heard}”` : 'listening…';
     const st = brain.st, a = st.i >= 0 ? st.plan[st.i] : null;
     if (st.status === 'thinking') return 'thinking…';
-    if (!a) return still > HINT_AFTER && hintI < HINTS.length ? HINTS[hintI][1] : '';
+    if (!a) return still > HINT_AFTER && hintI < HINTS.length && !said ? HINTS[hintI][1] : '';
     if (st.tag && st.tag !== 'reacting') return st.tag;
     const g = sim.s.gesture;
     if (g && g.def && g.def.hover && g.dur >= 4 && !(a.do === 'gesture' && a.started)) return 'getting up…';
@@ -169,7 +169,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     still = brain.idle ? still + dt : 0;
     if (still > HINT_AFTER && hintI < HINTS.length && (hintT += dt) > HINT_FOR) { hintI++; hintT = 0; }
     if (sayT > 0 && (sayT -= dt) <= 0) said = '';
-    $('brainRow').hidden = !brain.needsLocal;
+    offer();
 
     const line = doing();
     if (capDo.textContent !== line) capDo.textContent = line;   // only on change: the node is a live region

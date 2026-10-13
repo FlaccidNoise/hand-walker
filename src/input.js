@@ -7,6 +7,8 @@
 //   click the hand   poke it: it giggles, then jumps, then loses patience
 //   rest the cursor  the hand turns and points at it, and comes over if it stays
 //   hover            a brass ring and a label on the thing a click would use
+//   leave            the mouse goes off the page: the hand goes to that side and knocks.
+//                    The tab comes back after a while: it is at the glass, waving
 //   WASD / arrows    walk, camera-relative (hold Shift to scuttle); release = stop
 //   Q / E            pivot 45° left / right        Space  jump
 //   1-9, 0           emotes
@@ -25,6 +27,8 @@ const TOUCH = matchMedia('(pointer: coarse)').matches;
 const PROP_PAD = TOUCH ? 22 : 8;    // px — a press this near a thing's middle counts as on it
 const HAND_PAD = TOUCH ? 26 : 0;    // px — and this near the palm is a poke, however small the hand is drawn
 const LEAD_MOVE = 6;                // px a held pointer travels before the hand follows it
+const GONE_AFTER = 2.5;             // s the mouse is off the page before the hand goes looking
+const AWAY = 20;                    // s a hidden tab counts as time away
 const VERB = { switch: 'flip', bell: 'ring', ball: 'kick', rug: 'nap', piano: 'play' };
 const DIRS = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1],
   KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
@@ -159,6 +163,23 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
     }
   }
 
+  // it notices you leaving. Both are `auto` commands: any real input replaces them.
+  let goneT = -1, exit = null, hiddenAt = 0;
+  document.documentElement.addEventListener('mouseleave', (e) => { exit = { clientX: e.clientX, clientY: e.clientY }; goneT = 0; });
+  document.documentElement.addEventListener('mouseenter', () => { goneT = -1; });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    if (hiddenAt && Date.now() - hiddenAt > AWAY * 1000 && brain.idle)
+      brain.command([{ do: 'routine', name: 'knock' }], { source: 'auto', tag: 'glad you are back' });
+  });
+  function seek() {                                           // to the edge of the room nearest where the mouse went, and knock
+    aim(exit);
+    if (!ray.ray.intersectPlane(floor, hit)) hit.copy(ray.ray.direction).setY(0).normalize().multiplyScalar(30);   // it left over the walls
+    const x = THREE.MathUtils.clamp(hit.x, -half + 0.3, half - 0.3), z = THREE.MathUtils.clamp(hit.z, -half + 0.3, half - 0.3);
+    brain.command([{ do: 'walkTo', x, z, speed: C.SPEED.scuttle }, { do: 'face', heading: Math.atan2(-(hit.z - z), hit.x - x) },
+      { do: 'gesture', name: 'knock' }], { source: 'auto', tag: 'wondering where you went' });
+  }
+
   const fwd = new THREE.Vector3();
   let leadT = 0;
   function update(dt, shift) {
@@ -192,6 +213,7 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
       }
     }
     notice(dt);
+    if (goneT >= 0 && (goneT += dt) > GONE_AFTER) { goneT = -1; if (brain.idle) seek(); }
     let dx = 0, dz = 0;
     for (const k of held) { dx += DIRS[k][0]; dz += DIRS[k][1]; }
     if (acting && !(brain.st.plan === acting && brain.st.i >= 0)) acting = null;

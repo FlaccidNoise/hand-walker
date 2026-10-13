@@ -29,7 +29,7 @@
   #title { position:fixed; left:16px; top:12px; pointer-events:none; transition:opacity 1.2s; }
   #title h1 { margin:0; font-size:20px; font-weight:600; font-variant:small-caps; letter-spacing:.07em; }
   #title p { margin:0; font-size:13px; font-style:italic; color:var(--ink2); }
-  #title.quiet { opacity:.45; }
+  #title.quiet { opacity:.7; }
   #hud:not(:empty) ~ #title { display:none; }
 
   /* sound and help: top right */
@@ -42,7 +42,7 @@
   @keyframes pulse { 50% { transform:scale(1.18); border-color:var(--ring); } }
   [popover] { color:var(--ink); padding:12px 16px; margin:0; inset:auto; position:fixed; max-width:calc(100vw - 28px); box-sizing:border-box; }
   [popover] h2 { margin:8px 0 4px; font-size:13px; font-weight:400; font-variant:small-caps; letter-spacing:.07em; color:var(--ink2); }
-  [popover] h2:first-child { margin-top:0; }
+  @media (min-width:761px) { #pal h2 { margin-top:0; } }
   #help { right:14px; top:calc(22px + var(--tap)); width:300px; }
   #help dl { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; margin:0; }
   #help dd { margin:0; }
@@ -69,8 +69,10 @@
   #keys button, #pal button, #card button, #brainBtn { background:#1a1310d9; border:1px solid var(--line); border-radius:3px; min-height:var(--tap); padding:6px 13px; font-variant:small-caps; letter-spacing:.07em; white-space:nowrap; }
   #keys button:hover, #pal button:hover, #card button:hover, #brainBtn:hover { border-color:var(--brass); background:#2a1d14; }
   #keys kbd { margin-left:7px; font-size:11px; font-variant:normal; letter-spacing:0; color:var(--ink2); }
-  #pal { left:50%; transform:translateX(-50%); width:min(560px, calc(100vw - 24px)); max-height:60vh; overflow-y:auto; }
-  #pal div { display:flex; flex-wrap:wrap; gap:8px; }
+  #pal { left:50%; transform:translateX(-50%); width:min(900px, calc(100vw - 24px)); max-height:50vh; overflow-y:auto; }
+  #pal:popover-open { display:grid; grid-template-columns:5fr 7fr 5fr; gap:0 18px; }
+  #pal div { display:flex; flex-wrap:wrap; gap:6px; align-content:flex-start; }
+  @media (pointer:fine) { #pal button { min-height:30px; padding:3px 10px; font-size:13px; } }
   #talk { display:flex; width:min(360px, 100%); margin:0; background:var(--card); border:1px solid var(--edge); border-radius:3px; }
   #talk:focus-within { outline:2px solid var(--ring); outline-offset:2px; }
   #talkText { flex:1; min-width:0; height:calc(var(--tap) + 2px); padding:0 12px; background:none; border:0; outline:0; font-style:italic; -webkit-user-select:text; user-select:text; }
@@ -78,28 +80,35 @@
   #talk button { width:var(--tap); padding:0; background:none; border:0; border-left:1px solid var(--line); color:var(--ring); display:grid; place-items:center; touch-action:none; }
   #talk button:hover, #micBtn.on { background:#2a1d14; }
   #talk svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
-  #talkHint { margin:-3px 0 0; font-size:13px; font-style:italic; color:var(--ink2); }
-  #brainRow { font-size:13px; color:var(--ink2); }
-  #brainBtn { min-height:0; padding:3px 10px; font-size:13px; }
+  /* one line under the box: the voice hint, or the model offer and its progress. Its height never changes. */
+  #under { margin-top:-3px; font-size:13px; font-style:italic; color:var(--ink2); line-height:24px; }
+  @media (pointer:fine) { #under { height:24px; } }
+  #brainRow:not([hidden]) ~ #talkHint, #under:has(#brainRow:not([hidden])) #talkHint { display:none; }
+  #brainBtn { min-height:0; padding:0 10px; font-size:13px; font-style:normal; }
   #brainLoad progress { width:140px; height:6px; margin-left:8px; vertical-align:middle; accent-color:var(--brass); }
 
   @media (pointer:coarse) { #talkText { font-size:16px; } #keys kbd { display:none; } }
   @media (max-width:760px) {                 /* a phone: one row of cards that scrolls sideways */
-    #keys { flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; width:100%; scrollbar-width:none; scroll-snap-type:x proximity;
-      -webkit-mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+    #keys { flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; width:100%; scrollbar-width:none; scroll-snap-type:x proximity; }
     #keys::-webkit-scrollbar { display:none; }
     #keys button { scroll-snap-align:start; flex:none; }
     #keys button:last-child { margin-right:24px; }
     #talk { width:100%; }
     #soundTip { display:none; }
+    #pal:popover-open { display:block; }
+    #pal div { gap:8px; }
   }
   @media (max-height:500px) {                 /* a phone on its side: cards and the box share one row */
     #dock { flex-direction:row; width:calc(100vw - 24px); bottom:max(6px, env(safe-area-inset-bottom)); }
     #keys { flex:1; min-width:0; flex-wrap:nowrap; justify-content:flex-start; overflow-x:auto; scrollbar-width:none; }
+    #keys::-webkit-scrollbar { display:none; }
     #keys button { flex:none; }
+    #keys button:last-child { margin-right:24px; }
     #talk { width:230px; flex:none; }
-    #talkHint, #brainRow, #title p { display:none; }
+    #under, #title p { display:none; }
   }
+  /* a row that scrolls fades out at its right edge: there is more */
+  @media (max-width:760px), (max-height:500px) { #keys { -webkit-mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image:linear-gradient(90deg, #000 calc(100% - 28px), transparent); } }
   @media (prefers-reduced-motion:reduce) { * { animation:none !important; transition:none !important; } }
 </style>
 </head>
@@ -139,7 +148,7 @@
 <div id="tip" class="card" hidden></div>
 <div id="card"><div class="card" role="alert"><p id="cardMsg">Waking the hand…</p><button id="cardBtn" hidden onclick="location.reload()">Try again</button></div></div>
 <div id="pal" class="card" popover>
-  <h2>Moves</h2>
+  <section><h2>Moves</h2>
   <div>
     <button data-say="come here">come here</button>
     <button data-say="go to the door">to the door</button>
@@ -149,8 +158,8 @@
     <button data-say="jump">jump</button>
     <button data-say="take a nap">take a nap</button>
     <button data-say="stop">stop</button>
-  </div>
-  <h2>Signs</h2>
+  </div></section>
+  <section><h2>Signs</h2>
   <div>
     <button data-say="nod">yes</button>
     <button data-say="say no">no</button>
@@ -165,8 +174,8 @@
     <button data-say="point">point</button>
     <button data-say="beckon">beckon</button>
     <button data-say="snap">snap</button>
-  </div>
-  <h2>The room</h2>
+  </div></section>
+  <section><h2>The room</h2>
   <div>
     <button data-say="ring the bell">ring the bell</button>
     <button data-say="kick the ball">kick the ball</button>
@@ -174,7 +183,7 @@
     <button data-say="play the piano">play the piano</button>
     <button data-say="knock">knock on the glass</button>
     <button data-say="say hi in morse">hi in Morse</button>
-  </div>
+  </div></section>
 </div>
 <div id="dock" inert>
   <div id="keys">
@@ -193,10 +202,12 @@
     <button type="button" id="micBtn" hidden aria-label="Hold to speak a command"><svg viewBox="0 0 16 16"><rect x="6" y="1.5" width="4" height="8" rx="2"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5"/></svg></button>
     <button id="sendBtn" class="coarse" aria-label="Send"><svg viewBox="0 0 16 16"><path d="M2.5 8h11M9 3.5 13.5 8 9 12.5"/></svg></button>
   </form>
-  <p id="talkHint" class="fine" hidden>or hold <kbd>V</kbd> and speak</p>
-  <div id="brainRow" hidden>
-    <button id="brainBtn">Smarter replies: download a 340 MB model</button>
-    <label id="brainLoad" hidden>Downloading the brain<span id="brainPct"></span><progress id="brainBar" max="100"></progress></label>
+  <div id="under">
+    <span id="talkHint" class="fine" hidden>or hold <kbd>V</kbd> and speak</span>
+    <span id="brainRow" hidden>
+      <button id="brainBtn">Smarter replies: download a 340 MB model</button>
+      <label id="brainLoad" hidden>Downloading the brain<span id="brainPct"></span><progress id="brainBar" max="100"></progress></label>
+    </span>
   </div>
 </div>
 <script>
