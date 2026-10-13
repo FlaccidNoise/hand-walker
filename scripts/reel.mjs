@@ -45,8 +45,8 @@ try {
   await page.waitForFunction('window.__hand && window.__hand.state.ready', { timeout: 30000, polling: 100 });
   await page.evaluate(() => {
     // draw only the frame that is filmed, and show the pointer (a screenshot has none)
-    const h = window.__hand, draw = h.renderer.render.bind(h.renderer);
-    h.renderer.render = (...a) => { if (window.__film) draw(...a); };
+    const h = window.__hand, R = h.THREE.WebGLRenderer.prototype, draw = R.render;   // (the prototype: an old build has no __hand.renderer)
+    R.render = function (...a) { if (window.__film) draw.apply(this, a); };
     const c = document.createElement('div');
     c.style.cssText = 'position:fixed;z-index:99;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid #fff;background:#0006;pointer-events:none;left:-99px';
     document.body.append(c);
