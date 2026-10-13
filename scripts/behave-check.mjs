@@ -67,16 +67,11 @@ try {
       return !open && !shut ? 'the box is left ajar' : !vis ? (inside && shut ? null : 'the hand is hidden but not shut in its box')
         : inside && !open ? 'the hand stands, visible, inside a shut box' : onFlap && shut ? 'the front of the box shut on the hand' : null;
     };
-    let said = null;                                         // a brain error arrives through onsay
-    const page = h.brain.st.onsay;
-    h.brain.st.onsay = (t, k) => { if (k === 'error') said = t; if (page) page(t, k); };
     for (const p of plans) {
       if (!p.keep) { h.reset(); pump(1); }
       const t0 = h.sim.s.time;
-      said = null;
-      let err = p.start() ? null : `did not start: ${said}`;
-      while (!err && h.brain.st.i >= 0 && h.sim.s.time - t0 < LIMIT) { pump(0.25); err = said; }
-      if (!err) err = said;
+      let err = p.start() ? null : `did not start: ${h.brain.st.error}`;
+      while (!err && h.brain.st.i >= 0 && h.sim.s.time - t0 < LIMIT) { pump(0.25); err = h.brain.st.error; }
       if (!err && h.brain.st.i >= 0) err = `still running after ${LIMIT} s (${h.brain.st.detail})`;
       if (!err) { until(() => !h.sim.s.gesture, 8); pump(0.3); err = boxAgrees(); }
       const B = h.rig.mount.position, out0 = Math.max(Math.abs(B.x), Math.abs(B.z)) - h.C.ROOM.half;

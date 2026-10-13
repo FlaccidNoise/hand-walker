@@ -1,7 +1,7 @@
 // test/props.test.mjs — pure prop logic (src/props.js). Pure node.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stepBall, bellRings, switchFlips, BOX, inBox } from '../src/props.js';
+import { stepBall, bellRings, switchFlips, BOX, inBox, kickBall, KICK_MAX } from '../src/props.js';
 import * as C from '../src/tuning.js';
 
 const hand = (o = {}) => ({ x: 0, y: 1.4, z: 0, vx: 0, vz: 0, airborne: false, ...o });
@@ -90,4 +90,16 @@ test('box: the hand fits (extents measured on the mesh), and its lane is inside 
   assert.ok(lane - 0.6 > BOX.x0 && lane + 0.75 < BOX.x1, 'walking in');
   assert.ok(lane - 0.23 > BOX.x0 && lane + 0.95 < BOX.x1, 'lying on its side');
   assert.ok(BOX.h > 0.99 + 0.1 && BOX.x1 < C.ROOM.wall && BOX.z0 > -C.ROOM.wall);
+});
+
+test('a thrown ball takes the throw, capped, and still stops in the room', () => {
+  const b = { x: 0, z: 0, r: 0.32, vx: 0, vz: 0 };
+  kickBall(b, 1, -2);
+  assert.deepEqual([b.vx, b.vz], [1, -2]);
+  kickBall(b, 30, 40);
+  assert.ok(Math.abs(Math.hypot(b.vx, b.vz) - KICK_MAX) < 1e-9, 'capped');
+  assert.ok(Math.abs(b.vx / b.vz - 0.75) < 1e-9, 'same direction');
+  for (let i = 0; i < 3000; i++) stepBall(b, 0.01, hand({ x: -40 }));
+  assert.equal(Math.hypot(b.vx, b.vz), 0);
+  assert.ok(Math.abs(b.x) <= C.ROOM.wall && Math.abs(b.z) <= C.ROOM.wall);
 });

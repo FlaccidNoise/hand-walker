@@ -44,6 +44,13 @@ export function stepBall(b, dt, hand, blocks = []) {
   return hit > WALL_LOUD && d >= contact;                     // (a ball the hand is pressing into the wall is not a bounce)
 }
 
+// a throw from outside (the pointer): the ball takes that velocity, up to KICK_MAX u/s
+export const KICK_MAX = 4;
+export function kickBall(b, vx, vz) {
+  const s = Math.hypot(vx, vz), k = s > KICK_MAX ? KICK_MAX / s : 1;
+  b.vx = vx * k; b.vz = vz * k;
+}
+
 // bell: rings when the hand LANDS on or beside it (a jump). One ring per landing.
 export function bellRings(bell, hand, landed) {
   return landed && Math.hypot(hand.x - bell.x, hand.z - bell.z) < bell.r;
@@ -334,6 +341,7 @@ export function makeProps({ scene, lights }) {
 
   return {
     ids: Object.keys(P), get: (id) => P[id], state, fire: (id) => fire[id] && fire[id](),
+    kick: (vx, vz) => kickBall(ball, vx, vz),               // the pointer throws the ball
     set onEvent(f) { onEvent = f; },
     // sensed props + animation. hand = { x, y, z, vx, vz, airborne }
     // a fingertip came down at (x, z): a piano key plays its note, the bare floor ticks

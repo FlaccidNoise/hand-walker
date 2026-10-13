@@ -346,27 +346,19 @@ const SCENARIOS = {
   // the click-to-walk path: four brain walkTo legs with 90° course changes (on the
   // flat side of the room: the step at (0, 2.4) is a terrain test, not a gait one)
   async clickWalk(H) {
-    let berr = null;                                         // a brain error arrives through onsay
-    const page = H.brain.st.onsay;
-    H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
     // (x stops at 2.4: at 3 the second corner stood inside Thing's box, and the brain now
     // ends a walk clear of it, which bent the square)
     H.brain.run([{ do: 'walkTo', x: 2.4, z: 0, speed: 0.8 }, { do: 'walkTo', x: 2.4, z: -3, speed: 0.8 },
       { do: 'walkTo', x: -0.6, z: -3, speed: 0.8 }, { do: 'walkTo', x: -0.6, z: 0, speed: 0.8 }]);
     for (let i = 0; i < 400 && H.brain.st.i >= 0; i++) await sleep(100);
-    H.brain.st.onsay = page;
-    if (berr) throw new Error('clickWalk: brain ' + berr);
+    if (H.brain.st.error) throw new Error('clickWalk: brain ' + H.brain.st.error);
   },
   // a hop-turn straight into a scuttle (go and ring the bell, from rest): the first strides
   // of a trot. A digit held down past its reach by the support guard was thrown 0.32 u
   async hopScuttle(H) {
-    let berr = null;
-    const page = H.brain.st.onsay;
-    H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
     H.brain.run([{ do: 'walkTo', x: -3.2, z: 3.2, speed: 1.8 }]);
     for (let i = 0; i < 100 && H.brain.st.i >= 0; i++) await sleep(100);
-    H.brain.st.onsay = page;
-    if (berr) throw new Error('hopScuttle: brain ' + berr);
+    if (H.brain.st.error) throw new Error('hopScuttle: brain ' + H.brain.st.error);
   },
   // walk, stop, hold: the hand must halt fast, finish IN its stance, and then be still
   async stop(H) {

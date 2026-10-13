@@ -18,12 +18,15 @@ const GESTURE = { wave: 'waving', yes: 'nodding', no: 'wagging a finger', idk: '
   point: 'pointing', beckon: 'beckoning', thinking: 'thinking', tap: 'drumming its fingers', flipBird: 'being rude',
   snap: 'snap', doubleSnap: 'snap, snap', knock: 'knocking on the glass', dance: 'dancing', playDead: 'playing dead', sleep: 'napping',
   rpsRock: 'rock, paper, scissors', rpsPaper: 'rock, paper, scissors', rpsScissors: 'rock, paper, scissors',
-  rouse: 'waking up', nestle: 'settling in', emerge: 'coming out', stretch: 'stretching', startle: 'startled', peek: 'looking about', shake: 'cross' };
+  rouse: 'waking up', nestle: 'settling in', emerge: 'coming out', stretch: 'stretching', startle: 'startled', peek: 'having a look',
+  shake: 'no, no', crouch: '', land: '' };
 const ERRAND = { switch: 'off to the light switch', bell: 'off to ring the bell', ball: 'after the ball', rug: 'off for a nap', piano: 'playing the piano', box: 'going home' };
 const plain = (name) => String(name).replace(/([A-Z])/g, ' $1').toLowerCase();
 const HINTS = [['floor', TOUCH ? 'tap the floor' : 'click anywhere on the floor'], ['hand', TOUCH ? 'now tap me' : 'now click me'],
   ['prop', 'try the bell, the ball, the piano, the switch']];
 const HINT_AFTER = 1.5, HINT_FOR = 20, KNOCK_AFTER = 6;      // s wall
+const CAP_GAP = 14, CAP_EASE = 0.15;                          // px above the hand as drawn · s the caption takes to follow it
+const STUMP = 0.3, PAD = 0.14;                                // u — the stump past the wrist joint · flesh past a fingertip joint
 
 export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   const cv = renderer.domElement, body = rig.mount.position;
@@ -150,7 +153,8 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   // line 1: what the hand is doing, in a visitor's words
   function caption() {
     if (listening) return heard ? `heard “${heard}”` : 'listening…';
-    const st = brain.st, a = st.i >= 0 ? st.plan[st.i] : null;
+    const st = brain.st, now = st.i >= 0 ? st.plan[st.i] : null, next = st.plan[st.i + 1];
+    const a = now && now.do === 'face' && !now.for && next && next.do === 'gesture' ? next : now;   // the turn to the viewer is part of the sign
     if (st.status === 'thinking') return 'thinking…';
     if (!a) return still > HINT_AFTER && hintI < HINTS.length && !said ? HINTS[hintI][1] : '';
     if (st.tag && st.tag !== 'reacting') return st.tag;
@@ -163,6 +167,8 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
   }
 
   const cap = $('caption'), capDo = $('capDo'), capSay = $('capSay'), at = new THREE.Vector3();
+  const TIPS = Object.values(rig.digits).map(d => d.tip), knuckle = new THREE.Vector3();
+  let capX = 0, capY = 0, capOn = false;
   let rect = cv.getBoundingClientRect();
   addEventListener('resize', () => { rect = cv.getBoundingClientRect(); });
   function update(dt) {
@@ -177,12 +183,25 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     if (capDo.textContent !== line) capDo.textContent = line;   // only on change: the node is a live region
     if (capSay.textContent !== said) capSay.textContent = said;
     cap.hidden = !line && !said;
-    if (cap.hidden) return;
-    // over the wrist, from the live camera, kept clear of the page's edges and the dock
-    at.set(body.x, body.y + 0.7, body.z).project(camera);
+    if (cap.hidden) { capOn = false; return; }
+    // above the top of the hand as drawn (a sign held up must stay in view), centred on
+    // it, through the live camera. Eased, so a waving finger does not shake the words.
+    let lo = Infinity, hi = -Infinity, top = Infinity;
+    const see = () => {
+      at.project(camera);
+      const sx = rect.left + (at.x + 1) / 2 * rect.width, sy = rect.top + (1 - at.y) / 2 * rect.height;
+      lo = Math.min(lo, sx); hi = Math.max(hi, sx); top = Math.min(top, sy);
+    };
+    // the outline, near enough: the cut end of the stump (out past the wrist, away from
+    // the knuckles) and the five fingertips
+    rig.digits.middle.mcp.getWorldPosition(knuckle); rig.wrist.getWorldPosition(at);
+    at.addScaledVector(knuckle.sub(at).normalize(), -STUMP); see();
+    for (const j of TIPS) { j.getWorldPosition(at); at.y += PAD; see(); }
+    const k = capOn ? 1 - Math.exp(-dt / CAP_EASE) : 1;         // a caption that just appeared starts in place
+    capX += ((lo + hi) / 2 - capX) * k; capY += (top - CAP_GAP - capY) * k; capOn = true;
     const w = cap.offsetWidth / 2, floor = $('dock').getBoundingClientRect().top - 8;
-    const x = THREE.MathUtils.clamp(rect.left + (at.x + 1) / 2 * rect.width, 12 + w, innerWidth - 12 - w);
-    const y = THREE.MathUtils.clamp(rect.top + (1 - at.y) / 2 * rect.height, 12 + cap.offsetHeight, floor);
+    const x = THREE.MathUtils.clamp(capX, 12 + w, innerWidth - 12 - w);
+    const y = THREE.MathUtils.clamp(capY, 12 + cap.offsetHeight, floor);
     cap.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -100%)`;
   }
   return { update, cue, did, notice, caption };

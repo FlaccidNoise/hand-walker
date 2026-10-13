@@ -36,7 +36,8 @@ export function makeBrain(sim, rig, camera, props = null) {
   // status is what the hand is doing: idle, acting, idling or thinking. What it says or
   // reports goes out through onsay(text, kind), kind 'say' | 'notice' | 'error', and the
   // in-browser model's download through onload({state, pct, msg}): neither is a status.
-  const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null, onsay: null, onload: null };
+  // st.error holds the last plan failure until a new plan starts: the gates read it.
+  const st = { status: 'idle', detail: '', plan: [], i: -1, error: null, onstatus: null, onsay: null, onload: null };
   let bClock = 0;                                        // brain time, s sim
   // walls are visual-only in the sim; the brain is the only control path, so every
   // walk target clamps to the room interior and Thing simply never leaves
@@ -49,7 +50,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (st.onstatus) st.onstatus(st);
   };
   const say = (text, kind = 'say') => { if (st.onsay) st.onsay(text, kind); else if (kind === 'error') console.warn('[brain]', text); };
-  const fail = (msg) => { orphan(); sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); say(msg, 'error'); };
+  const fail = (msg) => { orphan(); sim.autoWalk(0, 0); st.i = -1; st.tag = null; st.error = msg; setStatus('idle'); say(msg, 'error'); };
   // marks: things a plan makes happen in the room as it goes. An action may carry `fire`
   // (at its start), a gesture `at: [[s, mark], ...]` (as it plays). 'hide' and 'show' are the
   // hand going out of sight in its box: render visibility only, the sim never knows
@@ -288,7 +289,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (st.i >= 0 && !/^walk/.test(plan[0].do)) sim.autoWalk(0, 0);
     orphan();
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
-    st.i = 0;
+    st.i = 0; st.error = null;
     st.tag = tag;                                        // idle behaviors show 'idling', not 'acting'
     setStatus(tag ? 'idling' : 'acting', tag ?? `1/${plan.length} ${plan[0].do}`);
     return true;
@@ -347,6 +348,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (ok) pokes = (pokes + 1) % POKES.length;          // a poke that was outranked did not happen
     return ok;
   }
+  const soothe = () => { pokes = 0; pokedAt = -1e9; };    // petted: the pokes are forgiven
 
   // ---- idle behaviors: compound plans when the USER goes quiet. Tracks its own
   // user-inactivity clock — the sim's lastInput is useless here because the
@@ -585,7 +587,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, react, rpsPick, get rps() { return round; }, mute: (m) => { muted = m; },
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, soothe, react, rpsPick, get rps() { return round; }, mute: (m) => { muted = m; },
     get idle() { return st.i < 0 && st.status === 'idle'; },
     behaviors: BEHAVIORS.map(b => b.name), routines: Object.keys(ROUTINES),
     get needsLocal() { return llmDown && local.supported && !local.ready; } };
