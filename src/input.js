@@ -44,8 +44,9 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
   marker.rotation.x = -Math.PI / 2;
   // the ring around a thing the pointer is on, or one just pressed. Sized from the
   // thing's world bounds and drawn here: no prop's own materials are touched.
-  const halo = new THREE.Mesh(new THREE.RingGeometry(0.95, 1, 64),
-    new THREE.MeshBasicMaterial({ color: 0xc9a35a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  const halo = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(new THREE.Path().absarc(0, 0, 1, 0, Math.PI * 2).getPoints(72)),
+    new THREE.LineBasicMaterial({ color: 0xe8c98a, transparent: true, opacity: 0, depthTest: false }));   // a hairline, the same width at any size
+  halo.renderOrder = 2;
   scene.add(marker, halo);
   let markerT = 1, lastClick = -1e9, rect = cv.getBoundingClientRect();
   const aim = (e) => {
@@ -67,14 +68,15 @@ export function initInput({ renderer, camera, controls, scene, rig, brain, props
     }
     return best;
   }
-  // lay the ring flat on the thing's thinnest side, wide enough to clear its corners
+  // lay the ring on the floor around the thing, wide enough to clear its corners. A flat
+  // plate on a wall (under half as deep as it is wide and tall) gets its ring on the wall.
   function ring(id) {
-    box.setFromObject(props.get(id).mesh); box.getSize(size); box.getCenter(mid);
+    box.setFromObject(props.get(id).mesh, true); box.getSize(size); box.getCenter(mid);   // precise: a rolling ball keeps its size
     const k = (s) => s * 0.72 + 0.1;
     halo.rotation.set(0, 0, 0);
-    if (size.y <= size.x && size.y <= size.z) { halo.rotation.x = -Math.PI / 2; halo.scale.set(k(size.x), k(size.z), 1); halo.position.set(mid.x, box.min.y + 0.02, mid.z); }
-    else if (size.z <= size.x) { halo.scale.set(k(size.x), k(size.y), 1); halo.position.set(mid.x, mid.y, box.max.z + 0.02); }
-    else { halo.rotation.y = Math.PI / 2; halo.scale.set(k(size.z), k(size.y), 1); halo.position.set(box.max.x + 0.02, mid.y, mid.z); }
+    if (size.z < 0.5 * Math.min(size.x, size.y)) { halo.scale.set(k(size.x), k(size.y), 1); halo.position.set(mid.x, mid.y, box.max.z + 0.02); }
+    else if (size.x < 0.5 * Math.min(size.y, size.z)) { halo.rotation.y = Math.PI / 2; halo.scale.set(k(size.z), k(size.y), 1); halo.position.set(box.max.x + 0.02, mid.y, mid.z); }
+    else { halo.rotation.x = -Math.PI / 2; halo.scale.set(k(size.x), k(size.z), 1); halo.position.set(mid.x, box.min.y + 0.02, mid.z); }
   }
   // the resting cursor: where it is on the floor, how long it has been still, what the hand has done about it
   const cur = { on: false, x: 0, z: 0, px: 0, py: 0, still: 0, stage: 0 };
