@@ -98,6 +98,28 @@ const perchSign = (extended, pose = () => UP) => ({
   dur: 2.2, hover: true, face: true, body: perch(0.24, 0.54),
   digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f =>
     [f, { base: extended.includes(f) ? pose(f) : f === 'thumb' ? FIST_THUMB : FIST, win: HOVER_WIN }])) });
+// rock, paper, scissors: up on the stump as a fist, three pumps of the fist (a hat on
+// each), and on four the sign. RPS_THROW is the gesture u of the throw: the brain takes
+// the visitor's pick until then. A digit that opens holds the fist until the throw (keys
+// in the digit window's own 0..1: 1.3 rad opens in 0.19 s at RATE_CARRY)
+export const RPS_DUR = 4.0, RPS_THROW = 0.42;
+const RPS_BEATS = [0.21, 0.28, 0.35];
+const rps = (open, pose = () => CURL) => {
+  const tw = RPS_THROW / HOVER_WIN[1], until = (v) => [[0, v], [tw, v], [tw + 0.07, 0], [1, 0]];
+  return {
+    dur: RPS_DUR, hover: true, face: true, cue: [...RPS_BEATS.map(u => [u, 'hat']), [RPS_THROW, 'snap']],
+    body: { pitch: perch(0.15, 0.54).pitch,
+      lift: [[0, 0], [0.15, PERCH_LIFT], ...[...RPS_BEATS, RPS_THROW].flatMap(u => [[u - 0.035, PERCH_LIFT + 0.16], [u, PERCH_LIFT]]),
+        [0.54, PERCH_LIFT], [0.64, 0.45], [0.85, 0.45], [1, 0]] },
+    digits: Object.fromEntries(['thumb', 'index', 'middle', 'ring', 'pinky'].map(f => {
+      if (!open.includes(f)) return [f, { base: f === 'thumb' ? FIST_THUMB : FIST, win: HOVER_WIN }];
+      // (a thumb that will open waits across the fist, not under it: from under, the
+      // floor threw its tip 0.75 u at the throw)
+      const to = pose(f), from = f === 'thumb' ? { yaw: 0, mcp: 0.9, pip: 1.2 } : FIST;
+      return [f, { base: to, win: HOVER_WIN, yaw: until(from.yaw - to.yaw), mcp: until(from.mcp - to.mcp), pip: until(from.pip - to.pip) }];
+    })),
+  };
+};
 // finger snap: thumb and middle meet, the middle whips into the palm, and the sound
 // lands on that frame (`cue` = [gesture u, name], played by main.js). There is no
 // finger-to-thumb contact solver: timing and the click sell it.
@@ -338,6 +360,9 @@ export const GESTURES = {
     cue: [[0.28, 'knock']],                    // the thud as it hits the floor
   },
   peek: PEEK,
+  rpsRock: rps([]),
+  rpsPaper: rps(['thumb', 'index', 'middle', 'ring', 'pinky']),
+  rpsScissors: rps(['index', 'middle'], f => ({ ...UP, yaw: f === 'index' ? -0.2 : 0.2 })),
   stretch: STRETCH,
   // into the box: lie down on its side (seated by u 0.22, up from 0.6). The brain shuts the
   // box at 1.1 s and hides the hand at 1.8 s, so the getting-up is never seen

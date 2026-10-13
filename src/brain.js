@@ -7,7 +7,7 @@
 // stops, pivots and goes for any command more than TURN_PIVOT off the heading.
 import * as C from './tuning.js';
 import * as M from './math.js';
-import { GESTURES, morseGesture } from './gestures.js';
+import { GESTURES, morseGesture, RPS_DUR, RPS_THROW } from './gestures.js';
 import { parseRules, isQuestion } from './rules.js';
 import { makeLocalLLM, LOCAL_MODEL } from './llm.js';
 
@@ -95,9 +95,12 @@ export function makeBrain(sim, rig, camera, props = null) {
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
         if (!GESTURES[a.name]) throw `unknown gesture "${a.name}"`;
         if (!sim.gesture(a.name)) return RUNNING;        // a hover or a pivot is finishing: try again
-        a.started = true; return RUNNING;
+        a.started = true;
+        if (a.game) round = { phase: 'count', you: a.pick ?? null, hand: null, result: null };
+        return RUNNING;
       }
       const g = sim.s.gesture;
+      if (a.game && !a.thrown && (!g || g.t >= RPS_THROW * RPS_DUR)) rpsThrow(a);
       for (a.k ??= 0; a.at && a.k < a.at.length && (!g || g.t >= a.at[a.k][0]); a.k++) mark(a.at[a.k][1]);
       return g ? RUNNING : DONE;
     },
@@ -193,6 +196,37 @@ export function makeBrain(sim, rig, camera, props = null) {
     home: () => [{ do: 'use', target: 'box' }],
     out: () => atHome() ? box.out() : [{ do: 'gesture', name: 'idk' }],
   };
+  // rock, paper, scissors. {do:'rps', pick?} becomes one gesture (rpsRock, rpsPaper or
+  // rpsScissors) with `game` set: the hand's sign is drawn before the count-in (it cannot
+  // cheat), the visitor's pick may arrive until the throw (rpsPick), and the result is a
+  // reaction after it. No pick: it just throws. `round` is the round in play or last
+  // played, for the page: phase 'count' (picks are open) or 'shown'; `hand` is null until
+  // the throw; `result` is the hand's side of it
+  const RPS = ['rock', 'paper', 'scissors'];
+  let round = null, lost = 0;
+  const rpsDraw = (a) => {
+    const hand = a.hand ?? RPS[Math.floor(Math.random() * 3)];
+    return { do: 'gesture', name: 'rps' + hand[0].toUpperCase() + hand.slice(1), game: true, hand, pick: RPS.includes(a.pick) ? a.pick : undefined };
+  };
+  function rpsPick(pick) {                               // false when no round is counting in
+    const a = RPS.includes(pick) && st.i >= 0 && st.plan.slice(st.i).find(b => b.game && !b.thrown);
+    if (!a) return false;
+    a.pick = pick; if (round && a.started) round.you = pick;
+    return true;
+  }
+  function rpsThrow(a) {
+    a.thrown = true;
+    const beats = (x, y) => (RPS.indexOf(x) - RPS.indexOf(y) + 3) % 3 === 1;
+    const result = !a.pick ? null : a.pick === a.hand ? 'draw' : beats(a.hand, a.pick) ? 'win' : 'lose';
+    round = { phase: 'shown', you: a.pick ?? null, hand: a.hand, result };
+    if (!result) return;
+    lost = result === 'lose' ? lost + 1 : 0;
+    const cap = (w) => w[0].toUpperCase() + w.slice(1);
+    say(result === 'draw' ? `${cap(a.hand)}. A draw.` : result === 'win' ? `${cap(a.hand)} beats ${a.pick}.` : `${cap(a.pick)} beats ${a.hand}.`, 'notice');
+    const then = result === 'win' ? [{ do: 'gesture', name: 'laugh' }] : result === 'draw' ? [{ do: 'gesture', name: 'shake' }]
+      : lost >= 3 ? (lost = 0, ROUTINES.sulk()) : [{ do: 'gesture', name: 'idk' }];
+    st.plan.splice(st.i + 1, 0, ...facing(then).map(b => ({ ...b, t: 0 })));
+  }
   const boxy = (a) => (a.do === 'use' && a.target === 'box') || (a.do === 'routine' && (a.name === 'home' || a.name === 'out'));
 
   // a sign is made AT someone (`face` in its def): turn to the viewer first, unless nearly there
@@ -202,6 +236,8 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
     plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
+    if (plan.length === 1 && plan[0].do === 'rps' && rpsPick(plan[0].pick)) return true;   // a pick for the round in play
+    plan = plan.map(a => a.do === 'rps' ? rpsDraw(a) : a);
     // out of sight in its box: whatever it is asked, it comes out first. Asked only to go
     // home, it stays. (Hidden and nowhere near the box: the sim was reset under it. Show it.)
     if (body.visible === false && box) {
@@ -379,6 +415,7 @@ Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 - {"do":"wait","s":S}
 - {"do":"use","target":ID} — go to a thing in the room and use it (the state line lists them)
 - {"do":"morse","text":"SOS"} — tap a SHORT word (8 characters at most) on the floor in real Morse code
+- {"do":"rps"} — play one round of rock, paper, scissors (add "pick":"rock" if they named their sign)
 - {"do":"routine","name":N} — a set piece: dance (music, spins, a bow), knock (come to the glass, rap on it, wave), sulk (a rude sign, then off to the corner), home (into your box, and the lid shuts), out (come out of your box)
 Answer questions with gestures wherever possible: agreement/yes → yes; refusal/negative → no; unknown → idk; funny → laugh; greeting → wave; pondering first → thinking. "say" is optional and SHORT — you speak in a dry, warm, upper-class British gentleman's voice, so phrase accordingly ("Right then", "I should think so", "Terribly sorry"). Only use say when a gesture cannot carry the answer.
 YOUR ROOM (a diorama the user looks into from a FIXED camera): floor spans x,z from -${C.ROOM.half} to ${C.ROOM.half}. Solid walls on the west (-x) and north (-z) sides; the north wall has a doorway at (0,-4.5). The south/east sides are open, facing the viewer. Named spots: center (0,0); the little step (0, 2.4) — you can climb on it; back corner (-4,-4); doorway (0,-4.2); front-right corner (4,4) — nearest the viewer.
@@ -436,6 +473,8 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
   let askGen = 0;                                        // a newer ask() retires every older reply
   async function ask(text) {
     const gen = ++askGen;
+    const pick = /^(?:i (?:pick|choose|play|throw) )?(rock|paper|scissors)[.!]?$/.exec(text.trim().toLowerCase());
+    if (pick && rpsPick(pick[1])) { lastUserAt = bClock; return { plan: [] }; }   // a pick: the round in play goes on
     stop();
     lastUserAt = bClock;                                 // real user input — behaviors reschedule
     // keyword rules first: a plain command needs no model and no wait. Questions and
@@ -519,7 +558,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, react, mute: (m) => { muted = m; },
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, react, rpsPick, get rps() { return round; }, mute: (m) => { muted = m; },
     get idle() { return st.i < 0 && st.status === 'idle'; },
     behaviors: BEHAVIORS.map(b => b.name), routines: Object.keys(ROUTINES),
     get needsLocal() { return llmDown && local.supported && !local.ready; } };

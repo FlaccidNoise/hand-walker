@@ -378,3 +378,28 @@ test('a walk that is not an errand to the box ends clear of it', () => {
   assert.deepEqual(m.brain.st.plan[0].target, { x: 3.9, z: -3.9 });
   delete THINGS.box.solid;
 });
+
+test('rock, paper, scissors: a pick is taken until the throw, the result is a reaction, three losses is a sulk', async () => {
+  const m = mock();
+  const play = (hand, pick, how = 'api') => {
+    m.brain.command([{ do: 'rps', hand }], { source: 'click' });     // (`hand` forced: the test is not a coin toss)
+    m.step(0.05);
+    assert.equal(m.brain.rps.phase, 'count');
+    assert.equal(m.brain.rps.hand, null, 'the hand does not show its sign early');
+    if (how === 'api') assert.equal(m.brain.rpsPick(pick), true); else m.brain.ask(pick);
+    m.step(0.4);                                                      // (the mock gesture lasts 0.2 s: thrown)
+    return m.brain.rps;
+  };
+  assert.deepEqual(play('rock', 'scissors'), { phase: 'shown', you: 'scissors', hand: 'rock', result: 'win' });
+  assert.deepEqual(m.calls.filter(c => c[0] === 'gesture').map(c => c[1]), ['rpsRock', 'laugh']);
+  assert.deepEqual(m.said.at(-1), ['Rock beats scissors.', 'notice']);
+  assert.equal(play('paper', 'paper', 'typed').result, 'draw', 'a typed sign is a pick, and does not stop the round');
+  assert.equal(m.brain.rpsPick('rock'), false, 'too late: it has thrown');
+  m.step(1);
+  for (let k = 0; k < 3; k++) { assert.equal(play('rock', 'paper').result, 'lose'); m.step(k < 2 ? 1 : 0.05); }
+  assert.ok(m.brain.st.plan.some(a => a.name === 'flipBird'), 'the third loss in a row: it sulks');
+  m.brain.cancel();
+  m.brain.command([{ do: 'rps' }], { source: 'click' }); m.step(0.6);
+  assert.equal(m.brain.rps.result, null, 'no pick: it just throws');
+  assert.equal(m.brain.rpsPick('lizard'), false);
+});

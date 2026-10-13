@@ -17,6 +17,7 @@ const TOUCH = matchMedia('(pointer: coarse)').matches;
 const GESTURE = { wave: 'waving', yes: 'nodding', no: 'wagging a finger', idk: 'shrugging', laugh: 'laughing', bow: 'bowing',
   point: 'pointing', beckon: 'beckoning', thinking: 'thinking', tap: 'drumming its fingers', flipBird: 'being rude',
   snap: 'snap', doubleSnap: 'snap, snap', knock: 'knocking on the glass', dance: 'dancing', playDead: 'playing dead', sleep: 'napping',
+  rpsRock: 'rock, paper, scissors', rpsPaper: 'rock, paper, scissors', rpsScissors: 'rock, paper, scissors',
   nestle: 'settling in', emerge: 'coming out', stretch: 'stretching', startle: 'startled', peek: 'looking about', shake: 'cross' };
 const ERRAND = { switch: 'off to the light switch', bell: 'off to ring the bell', ball: 'after the ball', rug: 'off for a nap', piano: 'playing the piano', box: 'going home' };
 const plain = (name) => String(name).replace(/([A-Z])/g, ' $1').toLowerCase();
