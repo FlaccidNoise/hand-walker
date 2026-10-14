@@ -273,23 +273,44 @@ export function makeProps({ scene, lights }) {
   let handZ = 0;                                              // the piano is played from the nearer end
 
   // Thing's box: three walls, a front that drops like a drawbridge, a lid hinged on the
-  // west side (it stands behind the hand from the viewer's side). Plain walnut and brass.
+  // west side (it stands behind the hand from the viewer's side). A walnut casket: banded
+  // panels on the faces the camera sees, brass at the corners, a tufted oxblood lining.
   // lid and flap run 0 (shut) to 1 (open) toward lidT and flapT
-  const boxG = new THREE.Group(), BT = 0.07, walnut = mat(0x2a1a11, { roughness: 0.55 }), walnutLt = mat(0x4a2f1d, { roughness: 0.5 });
+  const boxG = new THREE.Group(), BT = 0.07, walnut = mat(0x24160e, { roughness: 0.7 });
+  // matt wood: the camera stands in the moon rim's mirror direction (a polished lid turns lilac)
+  const panel = (w, h) => mat(0xffffff, { map: PAINT.casket(w, h), roughness: 0.85 });
+  const velvet = PAINT.lining(), lining = mat(0xd8d0d0, { map: velvet, roughness: 1, emissive: 0xffb070, emissiveMap: velvet, emissiveIntensity: 0 });
+  const fitting = mat(0x9a7a3e, { metalness: 0.6, roughness: 0.6 });   // brushed brass, matt for the same reason
+  // a slab whose faces take `faces` (BoxGeometry order: +x -x +y -y +z -z), plain walnut elsewhere
   const slab = (w, h, d, x, y, z, m, to = boxG) => {
-    const part = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    const part = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m.isMaterial ? m : [0, 1, 2, 3, 4, 5].map(k => m[k] ?? walnut));
     part.position.set(x, y, z); part.castShadow = part.receiveShadow = true; to.add(part);
     return part;
   };
-  slab(BOX.w, BOX.h, BT, 0, BOX.h / 2, -BOX.d / 2, walnut);                    // back
-  for (const sx of [-1, 1]) slab(BT, BOX.h, BOX.d, sx * BOX.w / 2, BOX.h / 2, 0, walnut);
-  slab(BOX.w, 0.02, BOX.d, 0, 0.012, 0, mat(0x6a1418, { roughness: 1 }));      // felt
+  const side = panel(BOX.d, BOX.h);
+  slab(BOX.w, BOX.h, BT, 0, BOX.h / 2, -BOX.d / 2, { 4: lining });               // back
+  slab(BT, BOX.h, BOX.d, -BOX.w / 2, BOX.h / 2, 0, { 0: lining, 1: side });      // west
+  slab(BT, BOX.h, BOX.d, BOX.w / 2, BOX.h / 2, 0, { 0: side, 1: lining });       // east: the side the camera sees
+  slab(BOX.w, 0.02, BOX.d, 0, 0.012, 0, lining);                                 // the bed
+  slab(0.03, 0.11, BOX.d + 0.03, BOX.w / 2 + BT / 2, 0.055, 0, walnut);          // a plinth along that side
   const flapG = new THREE.Group(), lidG = new THREE.Group();
   flapG.position.set(0, 0, BOX.d / 2); lidG.position.set(-BOX.w / 2, BOX.h, 0); boxG.add(flapG, lidG);
-  slab(BOX.w, BOX.h, BT, 0, BOX.h / 2, 0, walnutLt, flapG);
-  slab(BOX.w + 2 * BT, BT, BOX.d + 2 * BT, BOX.w / 2, BT / 2, 0, walnutLt, lidG);
-  slab(0.05, 0.1, 0.5, BOX.w + BT, 0, 0, brass, lidG);                         // the pull
+  slab(BOX.w, BOX.h, BT, 0, BOX.h / 2, 0, { 4: panel(BOX.w, BOX.h), 5: lining }, flapG);
+  slab(BOX.w + BT, 0.11, 0.03, 0, 0.055, BT / 2, walnut, flapG);                 // its plinth
+  slab(0.22, 0.32, 0.014, 0, BOX.h - 0.3, BT / 2 + 0.004, fitting, flapG);         // escutcheon
+  slab(0.04, 0.13, 0.004, 0, BOX.h - 0.33, BT / 2 + 0.012, walnut, flapG);       // keyhole: a slot under a bore
+  slab(0.085, 0.085, 0.004, 0, BOX.h - 0.25, BT / 2 + 0.012, walnut, flapG).rotation.z = Math.PI / 4;
+  const LW = BOX.w + 2 * BT, LD = BOX.d + 2 * BT;
+  slab(LW, BT, LD, BOX.w / 2, BT / 2, 0, { 2: panel(LW, LD), 3: lining }, lidG);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1])                              // brass caps wrap the lid's corners
+    slab(0.28, BT + 0.016, 0.28, BOX.w / 2 + sx * (LW / 2 - 0.132), BT / 2, sz * (LD / 2 - 0.132), fitting, lidG);
+  const engraved = mat(0xb08d4a, { map: PAINT.plate(), metalness: 0.5, roughness: 0.6 });
+  slab(0.7, 0.012, 0.4, BOX.w / 2, BT + 0.006, 0, { 0: fitting, 1: fitting, 2: engraved, 4: fitting, 5: fitting }, lidG);   // the plate on the lid
+  slab(0.05, 0.1, 0.5, BOX.w + BT, 0, 0, fitting, lidG);                         // the pull
   boxG.position.set(BOX.x, 0, BOX.z); scene.add(boxG);
+  // at night the box glows from inside: the lining, and a haze the walls hide until it opens
+  const nest = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow.material.map, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0 }));
+  nest.scale.setScalar(2.4); nest.position.set(BOX.x, 0.75, BOX.z); scene.add(nest);
   const box = { lid: 0, flap: 0, lidT: 0, flapT: 0, rattle: -1, near: false };
   const LID_OPEN = 1.45, LID_CRACK = 0.2;                     // rad · share of it when the lid lifts a crack
 
@@ -368,6 +389,9 @@ export function makeProps({ scene, lights }) {
       if (box.rattle >= 0 && (box.rattle += dt) > 0.45) box.rattle = -1;
       lidG.rotation.z = LID_OPEN * box.lid + (box.rattle >= 0 ? 0.05 * Math.abs(Math.sin(box.rattle * 42)) * Math.exp(-box.rattle * 5) : 0);
       flapG.rotation.x = Math.PI / 2 * box.flap;
+      // brightest through a crack, an ember once it stands open
+      const open = Math.max(box.lid, box.flap), night = 1 - state.level;
+      lining.emissiveIntensity = night * (1.3 - 0.9 * open); nest.material.opacity = 0.28 * night * Math.min(1, 4 * open);
       ballM.position.set(ball.x, ball.r, ball.z);
       const s = Math.hypot(ball.vx, ball.vz);
       if (s > 1e-4) { axis.set(ball.vz / s, 0, -ball.vx / s); ballM.rotateOnWorldAxis(axis, s * dt / ball.r); }

@@ -195,6 +195,48 @@ export const PAINT = {
     return t;
   },
 
+  // Thing's box. A walnut panel, w by h units: figured grain inside dark cross-banding
+  // and a line of brass stringing, drawn to scale so the border is as wide on every face
+  casket: (w, h) => tex(Math.round(w * 180), Math.round(h * 180), g => {
+    const W = g.canvas.width, H = g.canvas.height, r = rng(Math.round(w * 97 + h * 31));
+    g.fillStyle = '#2e1c11'; g.fillRect(0, 0, W, H);
+    for (let k = 0; k < 240; k++) {                          // the figure: long wavering streaks
+      const y = r() * H, a = 2 + r() * 9, f = 0.008 + r() * 0.02, p = r() * 7;
+      g.strokeStyle = `rgba(${r() < 0.55 ? '10,5,2' : '128,80,46'},${0.05 + r() * 0.1})`; g.lineWidth = 0.6 + r() * 2.2;
+      g.beginPath();
+      for (let x = 0; x <= W; x += 12) g.lineTo(x, y + a * Math.sin(x * f + p));
+      g.stroke();
+    }
+    for (const [inset, width, colour] of [[10, 20, 'rgba(14,8,5,0.72)'], [24, 2.5, 'rgba(190,152,82,0.85)'], [31, 1, 'rgba(190,152,82,0.4)']]) {
+      g.strokeStyle = colour; g.lineWidth = width; g.strokeRect(inset, inset, W - 2 * inset, H - 2 * inset);
+    }
+  }),
+
+  // its lining: oxblood velvet, button-tufted, darker into the corners
+  lining: () => tex(256, 256, g => {
+    const r = rng(5);
+    g.fillStyle = '#5c1620'; g.fillRect(0, 0, 256, 256);
+    for (let k = 0; k < 400; k++) { g.fillStyle = `rgba(${r() < 0.5 ? '20,2,6' : '150,60,66'},${0.03 + r() * 0.05})`; g.fillRect(r() * 256, r() * 256, 2 + r() * 14, 1 + r() * 2); }
+    g.strokeStyle = 'rgba(22,3,7,0.34)'; g.lineWidth = 2.5; g.beginPath();
+    for (let k = -4; k <= 8; k++) { g.moveTo(k * 64, 0); g.lineTo(k * 64 + 256, 256); g.moveTo(k * 64, 0); g.lineTo(k * 64 - 256, 256); }
+    g.stroke();
+    for (let i = 0; i <= 4; i++) for (let j = 0; j <= 8; j++) {
+      const x = i * 64 + (j % 2 ? 32 : 0), y = j * 32;
+      disc(g, x, y, 5.5, 'rgba(20,2,6,0.45)'); disc(g, x, y, 2.6, 'rgba(196,160,96,0.8)');
+    }
+    g.strokeStyle = 'rgba(10,1,4,0.38)'; g.lineWidth = 30; g.strokeRect(0, 0, 256, 256);
+  }),
+
+  // the brass plate on its lid. Pale: it tints a brass material
+  plate: () => tex(256, 148, g => {
+    g.fillStyle = '#f2ead6'; g.fillRect(0, 0, 256, 148);
+    g.strokeStyle = g.fillStyle = '#4a3618'; g.textAlign = 'center';
+    g.lineWidth = 3; g.strokeRect(9, 9, 238, 130); g.lineWidth = 1; g.strokeRect(16, 16, 224, 116);
+    g.font = 'bold 76px Georgia,serif'; g.fillText('T', 128, 92);
+    g.font = 'italic 17px Georgia,serif'; g.fillText('do not disturb', 128, 120);
+    for (const x of [22, 234]) for (const y of [22, 126]) disc(g, x, y, 3, '#4a3618');   // four pins
+  }),
+
   book: () => tex(256, 256, g => {
     g.fillStyle = '#4a1616'; g.fillRect(0, 0, 256, 256);
     g.strokeStyle = g.fillStyle = '#b08d4a'; g.textAlign = 'center';
