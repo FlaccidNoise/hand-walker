@@ -15,8 +15,10 @@ performance. Three review agents (look, interaction, character) each wrote a rep
 built their own proposal in a worktree. Everything is merged to `main`.
 
 **Shipped 2026-10-13 on Josh's word, after he watched the before/after film and the tour.**
-`hand-walker` main is pushed. The site carries `a1b07b0` as `personal-website` `55f31c0`
-(first deploy `8025ed2` carried `4c5ac7d`), live at https://joshtaylor.world/projects/hand-walker/demo/.
+`hand-walker` main is pushed. The site carries `cb8c578` as `personal-website` `5e6d265`
+(earlier deploys: `8025ed2` carried `4c5ac7d`, `55f31c0` carried `a1b07b0`), live at
+https://joshtaylor.world/projects/hand-walker/demo/. On 2026-10-14 `behave-check` ran 64/64
+green against the live bundle (`URL=https://joshtaylor.world/demos/hand-walker/index.html`).
 A fresh-context review of the shipped diff found three box bugs a visitor could hit (a held
 key opened the box empty with a click every 0.1 s, a resting cursor called the hand out of
 its box, the idle nap played its wake twice). `a1b07b0` fixes them, checked live.
