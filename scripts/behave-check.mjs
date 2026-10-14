@@ -9,7 +9,7 @@ const base = process.env.URL || 'http://localhost:8741/index.html';
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const LIMIT = 90;                                           // s sim per plan
 const browser = await puppeteer.launch({
-  executablePath: chrome, headless: 'new', protocolTimeout: 600000,
+  executablePath: chrome, headless: 'new', protocolTimeout: 1800000,             // one evaluate runs every plan
   args: ['--no-first-run', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'],
 });
 let bad = 0;
@@ -55,9 +55,28 @@ try {
             cut();
             return true;
           } }))),
+      // the box under a stream of commands, the way a held key or a drag sends them (one each
+      // 0.1 s), and the idle nap started from home. The marks are checked after every plan
+      ...[['a held key', () => h.brain.command([{ do: 'walkTo', x: 3.9, z: 0, speed: 0.8 }], { source: 'key' })],
+        ['a stream of emotes', () => h.brain.command([{ do: 'gesture', name: 'yes' }], { source: 'key' })]]
+        .map(([by, send]) => ({ name: `box home, ${by}`, start: () => {
+          home(); if (!until(() => h.brain.st.i < 0 && !h.rig.mount.visible && !h.sim.s.gesture, 40)) return false;
+          for (let k = 0; k < 60; k++) { send(); pump(0.1); }
+          return true;
+        } })),
+      { name: 'box home, then the nap', start: () => { home(); return until(() => h.brain.st.i < 0 && !h.rig.mount.visible && !h.sim.s.gesture, 40) && h.brain.behave('napping in its box'); } },
       // a key or a poke that lands mid-walk: the walk must stop, not carry the hand out of the room
       ...[['key', () => h.brain.command([{ do: 'gesture', name: 'wave' }], { source: 'key' })], ['poke', () => h.brain.poke()], ['jump', () => h.brain.command([{ do: 'jump' }], { source: 'key' })]]
         .map(([n, then]) => ({ name: `walk, then ${n}`, start: () => { h.brain.command([{ do: 'walkTo', x: -3, z: 2, speed: 1.8 }], { source: 'click' }); pump(1.2); return then(); } }))];
+    // the box's marks, as they fire: it never opens on a hidden hand, and it never rattles
+    // or cracks round a hand that is out of it (those are the hand inside, waking)
+    let wrong = null;
+    const fire0 = h.props.fire;
+    h.props.fire = (m) => {
+      const vis = h.rig.mount.visible;
+      if (!wrong && ((m === 'boxOpen' || m === 'boxLid') && !vis || (m === 'boxRattle' || m === 'boxCrack') && vis)) wrong = `${m} with the hand ${vis ? 'out' : 'hidden'} at ${h.sim.s.time.toFixed(2)} s`;
+      return fire0(m);
+    };
     const gT = (name) => h.sim.s.gesture && h.sim.s.gesture.name === name ? h.sim.s.gesture.t : -1;
     const home = () => h.brain.command([{ do: 'routine', name: 'home' }], { source: 'click' });
     const until = (pred, limit) => { for (let t = 0; t < limit; t += 0.05) { if (pred()) return true; pump(0.05); } return false; };
@@ -72,11 +91,11 @@ try {
     };
     for (const p of plans) {
       if (!p.keep) { h.reset(); pump(1); }
-      const t0 = h.sim.s.time;
+      const t0 = h.sim.s.time; wrong = null;
       let err = p.start() ? null : `did not start: ${h.brain.st.error}`;
       while (!err && h.brain.st.i >= 0 && h.sim.s.time - t0 < LIMIT) { pump(0.25); err = h.brain.st.error; }
       if (!err && h.brain.st.i >= 0) err = `still running after ${LIMIT} s (${h.brain.st.detail})`;
-      if (!err) { until(() => !h.sim.s.gesture, 8); pump(1.6); until(() => h.brain.st.i < 0 && !h.sim.s.gesture, 20); pump(0.3); err = h.brain.st.error || boxAgrees(); }   // (1.6 s: time to tidy up after itself)
+      if (!err) { until(() => !h.sim.s.gesture, 8); pump(1.6); until(() => h.brain.st.i < 0 && !h.sim.s.gesture, 20); pump(0.3); err = h.brain.st.error || boxAgrees() || wrong; }   // (1.6 s: time to tidy up after itself)
       const B = h.rig.mount.position, out0 = Math.max(Math.abs(B.x), Math.abs(B.z)) - h.C.ROOM.half;
       if (!err && out0 > 0.3) err = `ended ${out0.toFixed(1)} u outside the room`;
       out.push({ name: p.name, s: +(h.sim.s.time - t0).toFixed(1), err });

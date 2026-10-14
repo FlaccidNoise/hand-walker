@@ -21,6 +21,8 @@ test('unknown steps are dropped, an empty plan is null', () => {
   assert.equal(stepsToPlan([{ do: 'teleport' }, { do: 'gesture', name: 'moonwalk' }, null, 7]), null);
   assert.equal(stepsToPlan('not an array'), null);
   assert.equal(stepsToPlan([{ do: 'go', to: 'mars' }, { do: 'jump' }]).length, 1);
+  // keys a model can name that every object inherits are not places, directions or gestures
+  assert.equal(stepsToPlan([{ do: 'go', to: 'toString' }, { do: 'move', dir: 'constructor' }, { do: 'gesture', name: '__proto__' }]), null);
 });
 
 test('the reply parser survives think blocks and fences', () => {

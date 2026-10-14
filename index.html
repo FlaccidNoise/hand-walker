@@ -12,7 +12,7 @@
   html,body { margin:0; height:100%; background:#0b0908; overflow:hidden; overscroll-behavior:none; font:14px/1.4 var(--serif); color:var(--ink); }
   body { -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   #app { position:fixed; inset:0; }
-  canvas { display:block; }
+  canvas { display:block; touch-action:none; }                  /* drag, pinch, lead and fling are ours, not the page's scroll */
   #vig, #grain { position:fixed; inset:0; pointer-events:none; }
   #vig { background:radial-gradient(ellipse 75% 70% at 50% 46%, transparent 55%, rgba(4,3,3,.78) 100%); }
   #grain { background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity:.07; mix-blend-mode:overlay; }

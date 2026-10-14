@@ -87,6 +87,21 @@ test('an unknown source or action fails loudly', () => {
   assert.match(m.said.at(-1)[0], /unknown action "teleport"/);
 });
 
+test('a plan a model got wrong is refused before it reaches the sim', () => {
+  const m = mock();
+  for (const a of [{ do: 'walkTo', x: 'left', z: 0 }, { do: 'turn', deg: NaN }, { do: 'wait', s: Infinity }]) {
+    assert.equal(m.brain.command([a], { source: 'voice' }), false, JSON.stringify(a));
+    assert.match(m.brain.st.error, /must be finite numbers/);
+  }
+  for (const [a, why] of [[{ do: 'constructor' }, /unknown action/], [{ do: 'routine', name: 'toString' }, /unknown routine/]]) {
+    assert.equal(m.brain.command([a], { source: 'voice' }), false, JSON.stringify(a));
+    assert.match(m.brain.st.error, why);
+  }
+  m.brain.command([{ do: 'gesture', name: 'constructor' }], { source: 'voice' });
+  m.step(0.1);
+  assert.match(m.brain.st.error, /unknown gesture/);
+});
+
 test('a stale LLM reply is dropped when a newer ask is in flight', async () => {
   const m = mock(), pending = [];
   globalThis.fetch = () => new Promise(res => pending.push(res));

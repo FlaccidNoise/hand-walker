@@ -43,7 +43,7 @@ export function buildScene(container) {
 
   // fixed diorama camera: we look INTO Thing's room; orbit is a debug-only tool
   // (backtick re-enables it — see main.js)
-  const camera = new THREE.PerspectiveCamera(CAM_WIDE.fov, container.clientWidth / container.clientHeight, 0.01, 200);
+  const camera = new THREE.PerspectiveCamera(CAM_WIDE.fov, container.clientWidth / container.clientHeight || 1, 0.01, 200);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
@@ -127,6 +127,7 @@ export function buildScene(container) {
   };
   const onResize = () => {
     const w = container.clientWidth, h = container.clientHeight;
+    if (!w || !h) return;                                    // a 0×0 frame: 0/0 would put NaN in the follow for good
     camera.aspect = w / h;
     renderer.setSize(w, h);
     frame();

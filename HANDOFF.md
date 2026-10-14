@@ -28,7 +28,7 @@ The site's project page has a new still and the current gate count.
 
 ```bash
 npm run serve          # dev server on 127.0.0.1:8741 (serve.py: static + /llm + /tts)
-npm test               # unit (88) → calibration → matrix at 120 Hz → matrix at 60 Hz → behave-check (61 plans)
+npm test               # unit (89) → calibration → matrix at 120 Hz → matrix at 60 Hz → behave-check (64 plans)
 node scripts/qa-gate.mjs [scenario] [--hz N] [--save file.json]
 node scripts/behave-check.mjs
 node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME     # contact sheet, ?dev view
@@ -167,12 +167,12 @@ They are in git history: `git show 5c37738:HANDOFF.md`.
 9. A dragged ball does not follow the pointer. A missed high five has no feedback.
 10. The open box lid hides the light switch from the app camera while the box is open.
     Moving the plate to x 1.3 clears it (`plate`, `sw.x` and the switch `anchor.x` in `src/props.js`). Josh's call.
-11. From the same review, still open: model plan fields are not checked with `Number.isFinite`,
-    so a bad `x` from a model can put NaN in the sim. A 0×0 container latches NaN in the camera.
-    The canvas gets `touch-action:none` only from the debug orbit controls. Box test gap: nothing
-    sends a stream of commands at the box or checks that no `auto` plan or idle starts at home.
-    (Fixed 2026-10-14: play-dead false timeouts, "go home and come out", walks through the box,
-    the Popover fallback, Space after a pointer click on a button, the dead code.)
+11. The 2026-10-13 review's items are all fixed (2026-10-14): play-dead false timeouts,
+    "go home and come out", walks through the box, the Popover fallback, Space after a pointer
+    click, dead code, model plan numbers (`run()` refuses a field that is not a finite number,
+    and model keys go through `Object.hasOwn`), a 0×0 resize, `touch-action:none` on the canvas.
+    `behave-check` now fails any plan in which the box opens on a hidden hand or rattles round a
+    visible one, and sends command streams at the box. It went red on the old code (6 plans).
 12. Not built: mood that persists, the fingertips-over-the-rim box idle, the box as the
     loading state, the ransom note, chess, the phonograph, fetch and carry
     (`docs/research/interaction-ideas.md`).

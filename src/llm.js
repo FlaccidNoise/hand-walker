@@ -45,14 +45,14 @@ export function stepsToPlan(steps, pos = { x: 0, z: 0 }) {
   for (const s of Array.isArray(steps) ? steps.slice(0, 12) : []) {
     if (!s || typeof s !== 'object') continue;
     const speed = s.fast ? C.SPEED.sprint : C.SPEED.strut;
-    if (s.do === 'go' && PLACES[s.to]) { [x, z] = PLACES[s.to].map(clamp); plan.push({ do: 'walkTo', x, z, speed }); }
-    else if (s.do === 'move' && DIRS[s.dir]) {
+    if (s.do === 'go' && Object.hasOwn(PLACES, s.to)) { [x, z] = PLACES[s.to].map(clamp); plan.push({ do: 'walkTo', x, z, speed }); }
+    else if (s.do === 'move' && Object.hasOwn(DIRS, s.dir)) {
       x = clamp(x + DIRS[s.dir][0] * 2.5); z = clamp(z + DIRS[s.dir][1] * 2.5);
       plan.push({ do: 'walkTo', x, z, speed });
     } else if (s.do === 'turn') plan.push({ do: 'turn', deg: s.dir === 'around' ? 180 : s.dir === 'right' ? -90 : 90 });
     else if (s.do === 'jump') plan.push({ do: 'jump' });
     else if (s.do === 'use' && THINGS.includes(s.thing)) plan.push({ do: 'use', target: s.thing });
-    else if (s.do === 'gesture' && GESTURES[s.name]) plan.push({ do: 'gesture', name: s.name });
+    else if (s.do === 'gesture' && Object.hasOwn(GESTURES, s.name)) plan.push({ do: 'gesture', name: s.name });
   }
   return plan.length ? plan : null;
 }

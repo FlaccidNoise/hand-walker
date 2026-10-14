@@ -93,7 +93,8 @@ export function makeBrain(sim, rig, camera, props = null) {
   // lowered front (the front is `h` long and shuts through whatever stands there)
   const inFront = () => { const k = box && box.solid, p = body.position; return !!k && p.x > k.x0 && p.x < k.x1 && p.z > k.z0 && p.z < k.z1 + k.h + 0.33; };
   const opening = () => boxOpen || pending('boxOpen') || pending('show');
-  const tidy = () => [...(inFront() ? [{ ...box.leave()[0], fire: pending('boxOpen') ? undefined : 'boxOpen' }] : []), { do: 'wait', s: 0, fire: 'boxShut', box: true }];   // emerging: the box opens on its own mark
+  const stepOut = () => ({ ...box.leave()[0], fire: pending('boxOpen') ? undefined : 'boxOpen' });   // emerging: the box opens on its own mark
+  const tidy = () => [...(inFront() ? [stepOut()] : []), { do: 'wait', s: 0, fire: 'boxShut', box: true }];
   const settle = () => { if (st.i < 0 && st.status !== 'idle') setStatus('idle'); };   // no plan came of it: do not stay 'thinking'
 
   const ACTIONS = {
@@ -123,7 +124,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     gesture(a) {
       if (!a.started) {
         if (sim.s.airborne || sim.s.speed > C.V_MOVE) return RUNNING;  // settle first
-        if (!GESTURES[a.name]) throw `unknown gesture "${a.name}"`;
+        if (!Object.hasOwn(GESTURES, a.name)) throw `unknown gesture "${a.name}"`;
         if (!sim.gesture(a.name)) return RUNNING;        // a hover or a pivot is finishing: try again
         a.started = true;
         if (a.game) round = { phase: 'count', you: a.pick ?? null, hand: null, result: null };
@@ -211,6 +212,8 @@ export function makeBrain(sim, rig, camera, props = null) {
     face: () => 8,
   };
 
+  const NUM = ['x', 'z', 'forward', 'right', 'deg', 'heading', 'speed', 's', 'off'];   // the number fields of an action
+
   // routines: named bits made of plain actions. {do:'routine',name} expands in run().
   const FRONT = { x: 3.6, z: 3.6 };                      // the open corner nearest the viewer
   const toViewer = (p = body.position) => camera ? Math.atan2(-(camera.position.z - p.z), camera.position.x - p.x) : -Math.PI / 4;
@@ -228,7 +231,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     // its box: in, and out (asked to come out when it is out, it shrugs; caught standing in
     // it, it walks out)
     home: () => [{ do: 'use', target: 'box' }],
-    out: () => atHome() ? box.out() : opening() && inFront() ? box.leave() : [{ do: 'gesture', name: 'idk' }],
+    out: () => atHome() ? box.out() : opening() && inFront() ? [stepOut(), box.leave()[1]] : [{ do: 'gesture', name: 'idk' }],
   };
   // rock, paper, scissors. {do:'rps', pick?} becomes one gesture (rpsRock, rpsPaper or
   // rpsScissors) with `game` set: the hand's sign is drawn before the count-in (it cannot
@@ -268,8 +271,11 @@ export function makeBrain(sim, rig, camera, props = null) {
     ? [{ do: 'face', viewer: true, off: GESTURES[a.name].face === true ? 0 : GESTURES[a.name].face, within: FACE_WITHIN }, a] : [a]);
   function run(plan, tag = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
+    // a model writes plans: a field that is not a finite number would put NaN in the sim for good
+    const bad = plan.find(a => !a || typeof a !== 'object' || NUM.some(k => a[k] != null && !Number.isFinite(a[k])));
+    if (bad) { fail(`bad action ${JSON.stringify(bad)}: ${NUM.join(', ')} must be finite numbers`); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
-    plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
+    plan = plan.map(a => !Object.hasOwn(ACTIONS, a.do) && Object.hasOwn(GESTURES, a.do) ? { do: 'gesture', name: a.do } : a);
     if (sim.s.gesture && sim.s.gesture.name === 'sleep') plan = [{ do: 'gesture', name: 'rouse' }, ...plan];   // woken: it stretches first
     if (plan.length === 1 && plan[0].do === 'rps' && rpsPick(plan[0].pick)) return true;   // a pick for the round in play
     plan = plan.map(a => a.do === 'rps' ? rpsDraw(a) : a);
@@ -287,7 +293,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     let noRoutine = null;
     let goes = false;                                    // "go home and come out": out of the box it went into
     plan = plan.flatMap(a => a.do !== 'routine' ? [a] : a.name === 'out' && goes ? box.out()
-      : ROUTINES[a.name] ? (goes ||= a.name === 'home', ROUTINES[a.name]()) : (noRoutine = a.name, []));
+      : Object.hasOwn(ROUTINES, a.name) ? (goes ||= a.name === 'home', ROUTINES[a.name]()) : (noRoutine = a.name, []));
     if (noRoutine) { fail(`unknown routine "${noRoutine}" — have: ${Object.keys(ROUTINES).join(', ')}`); return false; }
     // {do:'use',target}: go to the prop's anchor, face it, then do what the prop asks for
     let unknown = null;
@@ -303,7 +309,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
     if (box && opening() && !atHome() && !plan[0].box && plan[0].for !== 'box') plan = [...tidy(), ...plan];
     plan = facing(plan);
-    for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
+    for (const a of plan) if (!Object.hasOwn(ACTIONS, a.do)) { fail(`unknown action "${a.do}"`); return false; }
     // a walk the new plan does not continue must stop: the next action waits for a
     // standing hand, and nothing else would zero the sim's walk command
     if (st.i >= 0 && !/^walk/.test(plan[0].do)) sim.autoWalk(0, 0);
