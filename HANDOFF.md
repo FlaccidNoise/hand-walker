@@ -15,8 +15,11 @@ performance. Three review agents (look, interaction, character) each wrote a rep
 built their own proposal in a worktree. Everything is merged to `main`.
 
 **Shipped 2026-10-13 on Josh's word, after he watched the before/after film and the tour.**
-`hand-walker` main is pushed at `4c5ac7d`. The site carries that build as
-`personal-website` `8025ed2`, live at https://joshtaylor.world/projects/hand-walker/demo/.
+`hand-walker` main is pushed. The site carries `a1b07b0` as `personal-website` `55f31c0`
+(first deploy `8025ed2` carried `4c5ac7d`), live at https://joshtaylor.world/projects/hand-walker/demo/.
+A fresh-context review of the shipped diff found three box bugs a visitor could hit (a held
+key opened the box empty with a click every 0.1 s, a resting cursor called the hand out of
+its box, the idle nap played its wake twice). `a1b07b0` fixes them, checked live.
 The live page was checked in headless Chrome: it loads in the site's frame, a click walks
 the hand, a typed "ring the bell" runs from the keyword rules, no console error, no 4xx.
 The site's project page has a new still and the current gate count.
@@ -164,7 +167,16 @@ They are in git history: `git show 5c37738:HANDOFF.md`.
 9. A dragged ball does not follow the pointer. A missed high five has no feedback.
 10. The open box lid hides the light switch from the app camera while the box is open.
     Moving the plate to x 1.3 clears it (`plate`, `sw.x` and the switch `anchor.x` in `src/props.js`). Josh's call.
-11. Not built: mood that persists, the fingertips-over-the-rim box idle, the box as the
+11. From the same review, not fixed (each is small): a jump or Morse sent within 0.6 s of
+    a play-dead wake reports a false timeout (`brain.js` `jump`/`morse` lack the +8 s hover
+    wait). "go home and come out" expands `out` while still outside, so it shrugs in the box.
+    Walks clamp only their end point and can cut through the box. No Popover API fallback
+    (Safari 16.4 to 16.7). Model plan fields are not checked with `Number.isFinite`, so a
+    bad `x` can put NaN in the sim. After a click on ♪ or ?, Space presses that button.
+    Dead code: `st.onstatus`, `paintStats`, `EMOTE_KEYS` export, unused `buildScene` returns.
+    Box test gap: nothing sends a stream of commands at the box or checks that no `auto`
+    plan or idle starts at home.
+12. Not built: mood that persists, the fingertips-over-the-rim box idle, the box as the
     loading state, the ransom note, chess, the phonograph, fetch and carry
     (`docs/research/interaction-ideas.md`).
 
