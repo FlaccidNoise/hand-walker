@@ -50,7 +50,7 @@ node scripts/reel.mjs --cues cues.mjs --out x.mp4                             # 
 | A key or a poke during a click-walk | hand walks out of the room | walk stops, action plays |
 | Idle picks that move the hand under 2 px on screen | 46% of weight | 0 |
 | Thumbs-up thumb, off vertical on screen | about 30° | under 6° |
-| Triangles drawn per frame | 10.9 k | 6.5 k before the box was dressed |
+| Triangles, draw calls per frame | 10.9 k, about 30 | 6.5 k, 125 (the outer field no longer draws) |
 | Unit tests, behave-check plans | 51, 20 | 88, 61 |
 
 ## What changed
