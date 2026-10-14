@@ -50,7 +50,7 @@ node scripts/reel.mjs --cues cues.mjs --out x.mp4                             # 
 | A key or a poke during a click-walk | hand walks out of the room | walk stops, action plays |
 | Idle picks that move the hand under 2 px on screen | 46% of weight | 0 |
 | Thumbs-up thumb, off vertical on screen | about 30° | under 6° |
-| Triangles, draw calls per frame | 10.9 k, about 30 | 6.5 k, 125 (the outer field no longer draws) |
+| Triangles drawn per frame | 10.9 k | 6.5 k (the outer field no longer draws). 125 draw calls now, not measured before |
 | Unit tests, behave-check plans | 51, 20 | 88, 61 |
 
 ## What changed
@@ -157,7 +157,9 @@ They are in git history: `git show 5c37738:HANDOFF.md`.
 7. The mesh is faceted at the knuckles in the perch poses (1360 vertices). Paint cannot fix it.
 8. The stump is rigid with the palm: it cannot look at things (needs a bone or a vertex bend).
 9. A dragged ball does not follow the pointer. A missed high five has no feedback.
-10. Not built: mood that persists, the fingertips-over-the-rim box idle, the box as the
+10. The open box lid hides the light switch from the app camera while the box is open.
+    Moving the plate to x 1.3 clears it (`plate`, `sw.x` and the switch `anchor.x` in `src/props.js`). Josh's call.
+11. Not built: mood that persists, the fingertips-over-the-rim box idle, the box as the
     loading state, the ransom note, chess, the phonograph, fetch and carry
     (`docs/research/interaction-ideas.md`).
 
