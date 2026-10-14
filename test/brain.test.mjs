@@ -10,10 +10,10 @@ const fired = [];                                            // prop events the 
 const THINGS = {
   bell: { anchor: { x: 2, z: 0 }, facing: 0, plan: () => [{ do: 'jump' }] },
   // the box as src/props.js stages it: a footprint, a walk in, a lie-down that shuts and
-  // hides, and the way out
-  box: { solid: { x0: 3, x1: 5, z0: -5, z1: -3 }, anchor: { x: 3.9, z: -2.2 }, open: 'boxOpen',
+  // hides, and the way out. (The mock stops dead a stopping distance short: the exit is at -1.0)
+  box: { solid: { x0: 3, x1: 5, z0: -5, z1: -3, h: 1.25 }, anchor: { x: 3.9, z: -2.2 }, open: 'boxOpen',
     plan: () => [{ do: 'walkTo', x: 3.9, z: -3.6 }, { do: 'gesture', name: 'nestle', at: [[1.1, 'boxShut'], [1.8, 'hide']] }],
-    leave: () => [{ do: 'walkTo', x: 3.9, z: -1.3, fire: 'boxOpen', box: true }, { do: 'gesture', name: 'stretch', fire: 'boxShut', box: true }],
+    leave: () => [{ do: 'walkTo', x: 3.9, z: -1.0, fire: 'boxOpen', box: true }, { do: 'gesture', name: 'stretch', fire: 'boxShut', box: true }],
     out() { return [{ do: 'face', heading: -Math.PI / 2, box: true },
       { do: 'gesture', name: 'emerge', box: true, at: [[1.2, 'boxCrack'], [1.25, 'show'], [2.0, 'boxLid'], [2.8, 'boxOpen']] }, ...this.leave()]; } },
 };
@@ -383,16 +383,19 @@ test('home: asked to come out when it is out, it shrugs; hidden outside the box 
 
 // run until the plan and its gesture are over (not for a fixed time: left alone for 14 s the
 // brain starts an idle behaviour, and the mock room has no ball or piano for it)
-function done(m) { for (let k = 0; k < 600 && (m.brain.st.i >= 0 || m.sim.s.gesture); k++) m.step(0.1); m.step(0.1); }
-// the hand and its box agree, from the marks the brain fired: hidden means shut in; visible
-// means not inside a box that is not fully open; and the box is never left ajar
+function done(m) {
+  const idle = () => { for (let k = 0; k < 600 && (m.brain.st.i >= 0 || m.sim.s.gesture); k++) m.step(0.1); };
+  idle(); m.step(1.5); idle(); m.step(0.1);                // (1.5 s: time to tidy up after itself)
+}
+// the hand and its box agree at the end, from the marks the brain fired: the box is shut,
+// and the hand is hidden inside it or visible and clear of it (not in it, not on its front)
 function boxAgrees(m) {
   let lid = 0, flap = 0;
   for (const f of fired) { if (f === 'boxOpen') lid = flap = 1; else if (f === 'boxShut') lid = flap = 0; else if (f === 'boxCrack') lid = 0.2; else if (f === 'boxLid') lid = 1; }
-  const k = THINGS.box.solid, p = m.pos, inside = p.x > k.x0 && p.x < k.x1 && p.z > k.z0 && p.z < k.z1;
-  const vis = m.rig.mount.visible !== false, open = lid === 1 && flap === 1, shut = lid === 0 && flap === 0;
-  return !open && !shut ? 'the box is left ajar' : !vis ? (inside && shut ? null : 'hidden but not shut in')
-    : inside && !open ? 'visible inside a shut box' : null;
+  const k = THINGS.box.solid, p = m.pos, inX = p.x > k.x0 && p.x < k.x1, inside = inX && p.z > k.z0 && p.z < k.z1, onFront = inX && p.z >= k.z1 && p.z < k.z1 + k.h + 0.33;
+  const vis = m.rig.mount.visible !== false;
+  return lid || flap ? `the box is left ${flap ? 'open' : 'ajar'}` : !vis ? (inside ? null : 'hidden but not in its box')
+    : inside ? 'visible inside a shut box' : onFront ? 'the front shut on the hand' : null;
 }
 const CUTS = {
   'come out': (m) => { m.brain.ask('come out'); },
@@ -403,7 +406,7 @@ const CUTS = {
   'stop': (m) => { m.brain.cancel(); },
 };
 
-test('going home, cut into every 0.1 s by every kind of input: the hand and the box agree at the end', () => {
+test('going home, cut into every 0.1 s from its first step by every kind of input: the hand and the box agree at the end', () => {
   for (const [by, cut] of Object.entries(CUTS)) for (let t = 0; t <= 12; t += 0.1) {
     const m = mock(); fired.length = 0;
     m.brain.command([{ do: 'routine', name: 'home' }], { source: 'click' });
