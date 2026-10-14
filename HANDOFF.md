@@ -21,7 +21,7 @@ He also had not watched the 2026-10-10 fun pass. Pushing either repo needs his y
 
 ```bash
 npm run serve          # dev server on 127.0.0.1:8741 (serve.py: static + /llm + /tts)
-npm test               # unit (88) → calibration → matrix at 120 Hz → matrix at 60 Hz → behave-check (55 plans)
+npm test               # unit (88) → calibration → matrix at 120 Hz → matrix at 60 Hz → behave-check (61 plans)
 node scripts/qa-gate.mjs [scenario] [--hz N] [--save file.json]
 node scripts/behave-check.mjs
 node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME     # contact sheet, ?dev view
@@ -51,7 +51,7 @@ node scripts/reel.mjs --cues cues.mjs --out x.mp4                             # 
 | Idle picks that move the hand under 2 px on screen | 46% of weight | 0 |
 | Thumbs-up thumb, off vertical on screen | about 30° | under 6° |
 | Triangles drawn per frame | 10.9 k | 6.5 k before the box was dressed |
-| Unit tests, behave-check plans | 51, 20 | 88, 55 |
+| Unit tests, behave-check plans | 51, 20 | 88, 61 |
 
 ## What changed
 
@@ -100,7 +100,7 @@ node scripts/reel.mjs --cues cues.mjs --out x.mp4                             # 
 - A head-cock while a question is out with the model.
 - Thing's box (`use box`, "go home", "come out"): the hand walks in, lies down, the box
   shuts. Any command brings it out first. A command at any moment of either sequence ends
-  with hand and box in agreement (55-plan behave-check holds this).
+  with hand and box in agreement (61-plan behave-check holds this).
 - Rock paper scissors: `{do:'rps'}`, `brain.rpsPick(sign)`, `brain.rps`.
 - A click or a key wakes a nap or play dead. The nap is a lie-down on the rug.
 
