@@ -97,7 +97,7 @@ src/brain.js    command layer, plan executor, idle behaviors
 src/rules.js    text → plan by keyword rules
 src/llm.js      in-browser language model
 src/input.js    clicks, keys, pokes, cursor awareness
-src/props.js    light switch, bell, ball, rug, floor piano, all sound
+src/props.js    light switch, bell, ball, rug, floor piano, Thing's box, all sound
 src/tuning.js   every constant
 src/terrain.js  procedural ground height
 src/scene.js    room, lighting, camera
