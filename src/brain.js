@@ -36,7 +36,8 @@ export function makeBrain(sim, rig, camera, props = null) {
   // status is what the hand is doing: idle, acting, idling or thinking. What it says or
   // reports goes out through onsay(text, kind), kind 'say' | 'notice' | 'error', and the
   // in-browser model's download through onload({state, pct, msg}): neither is a status.
-  const st = { status: 'idle', detail: '', plan: [], i: -1, onstatus: null, onsay: null, onload: null };
+  // st.error holds the last plan failure until a new plan starts: the gates read it.
+  const st = { status: 'idle', detail: '', plan: [], i: -1, error: null, onstatus: null, onsay: null, onload: null };
   let bClock = 0;                                        // brain time, s sim
   // walls are visual-only in the sim; the brain is the only control path, so every
   // walk target clamps to the room interior and Thing simply never leaves
@@ -49,21 +50,42 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (st.onstatus) st.onstatus(st);
   };
   const say = (text, kind = 'say') => { if (st.onsay) st.onsay(text, kind); else if (kind === 'error') console.warn('[brain]', text); };
-  const fail = (msg) => { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); say(msg, 'error'); };
+  const fail = (msg) => { orphan(); sim.autoWalk(0, 0); st.i = -1; st.tag = null; st.error = msg; setStatus('idle'); say(msg, 'error'); };
   // marks: things a plan makes happen in the room as it goes. An action may carry `fire`
   // (at its start), a gesture `at: [[s, mark], ...]` (as it plays). 'hide' and 'show' are the
   // hand going out of sight in its box: render visibility only, the sim never knows
-  const mark = (m) => { if (m === 'hide' || m === 'show') body.visible = m === 'show'; else if (props) props.fire(m); };
+  let boxOpen = false;                                   // the box stands open (by a mark: the brain's own account of it)
+  const mark = (m) => {
+    if (m === 'hide' || m === 'show') return void (body.visible = m === 'show');
+    if (/^box/.test(m)) boxOpen = m !== 'boxShut' && (boxOpen || m !== 'boxRattle');
+    if (props) props.fire(m);
+  };
   const box = props && props.get('box');
   // the box is solid to look at and nothing to the sim: a walk that is not an errand to
   // the box ends outside it, a hand's width clear (0.7 to the side, 0.5 off the front).
   // The box stands in the +x, -z corner
   const clearOfBox = (p, a) => {
-    const k = box && a.for !== 'box' && box.solid;
+    const k = box && a.for !== 'box' && !a.box && box.solid;
     if (!k || p.x <= k.x0 - 0.7 || p.z >= k.z1 + 0.5) return p;
     return p.x - (k.x0 - 0.7) < k.z1 + 0.5 - p.z ? { x: k.x0 - 0.7, z: p.z } : { x: p.x, z: k.z1 + 0.5 };
   };
-  const atHome = () => body.visible === false && Math.hypot(body.position.x - box.anchor.x, body.position.z - box.anchor.z) < 4;
+  // A plan can be replaced or stopped at any moment, and a hover cannot be cut: the hand
+  // goes on lying down, or sitting up, with nobody to shut the box on it or open it. So
+  // the marks of a gesture that outlives its plan are kept (`trail`) and fire on time.
+  // The box then always ends shut on a hidden hand or open round a visible one.
+  let trail = null;
+  const live = () => { const a = st.i >= 0 && st.plan[st.i]; return a && a.at && a.started ? a : trail; };
+  const orphan = () => { const a = live(); if (a && sim.s.gesture && (a.k ?? 0) < a.at.length) trail = { name: a.name, at: a.at, k: a.k ?? 0 }; };
+  const pending = (m) => { const a = live(); return !!a && a.at.slice(a.k ?? 0).some(x => x[1] === m); };
+  // home: out of sight in the box, or about to be (lying down in it), and not on the way out
+  const inside = () => { const k = box && box.solid, p = body.position; return !!k && p.x > k.x0 && p.x < k.x1 && p.z > k.z0 && p.z < k.z1; };
+  const atHome = () => !!box && (pending('hide') || (body.visible === false && !pending('show') && inside()));
+  // An open box is part of an errand to it. Anything else shuts it first: at once when the
+  // hand is clear, and after stepping out by the front when it stands in the box or on its
+  // lowered front (the front is `h` long and shuts through whatever stands there)
+  const inFront = () => { const k = box && box.solid, p = body.position; return !!k && p.x > k.x0 && p.x < k.x1 && p.z > k.z0 && p.z < k.z1 + k.h + 0.33; };
+  const opening = () => boxOpen || pending('boxOpen') || pending('show');
+  const tidy = () => [...(inFront() ? [box.leave()[0]] : []), { do: 'wait', s: 0, fire: 'boxShut', box: true }];
   const settle = () => { if (st.i < 0 && st.status !== 'idle') setStatus('idle'); };   // no plan came of it: do not stay 'thinking'
 
   const ACTIONS = {
@@ -192,9 +214,10 @@ export function makeBrain(sim, rig, camera, props = null) {
     // offended: one rude sign, then off to the far corner to sulk with its back turned
     sulk: () => [{ do: 'gesture', name: 'flipBird' }, { do: 'walkTo', x: -4, z: -4, speed: C.SPEED.scuttle },
       { do: 'face', heading: Math.PI * 0.75 }, { do: 'wait', s: 2 }],
-    // its box: in, and out (asked to come out when it is out, it shrugs)
+    // its box: in, and out (asked to come out when it is out, it shrugs; caught standing in
+    // it, it walks out)
     home: () => [{ do: 'use', target: 'box' }],
-    out: () => atHome() ? box.out() : [{ do: 'gesture', name: 'idk' }],
+    out: () => atHome() ? box.out() : opening() && inFront() ? box.leave() : [{ do: 'gesture', name: 'idk' }],
   };
   // rock, paper, scissors. {do:'rps', pick?} becomes one gesture (rpsRock, rpsPaper or
   // rpsScissors) with `game` set: the hand's sign is drawn before the count-in (it cannot
@@ -236,14 +259,19 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (!Array.isArray(plan) || !plan.length) { fail('empty plan'); return false; }
     // LLMs sometimes emit a gesture as an action ({"do":"sleep"}) — normalize
     plan = plan.map(a => !ACTIONS[a.do] && GESTURES[a.do] ? { do: 'gesture', name: a.do } : a);
+    if (sim.s.gesture && sim.s.gesture.name === 'sleep') plan = [{ do: 'gesture', name: 'rouse' }, ...plan];   // woken: it stretches first
     if (plan.length === 1 && plan[0].do === 'rps' && rpsPick(plan[0].pick)) return true;   // a pick for the round in play
     plan = plan.map(a => a.do === 'rps' ? rpsDraw(a) : a);
-    // out of sight in its box: whatever it is asked, it comes out first. Asked only to go
-    // home, it stays. (Hidden and nowhere near the box: the sim was reset under it. Show it.)
-    if (body.visible === false && box) {
-      if (!atHome()) body.visible = true;
-      else if (plan.every(a => a.do === 'routine' && a.name === 'home')) return true;
-      else plan = [{ do: 'routine', name: 'out' }, ...plan.filter(a => !boxy(a))];
+    // home (or lying down to be): whatever it is asked, it finishes going in and comes out
+    // first. Asked only to go home, it stays. (Hidden and not in the box: the sim was reset
+    // under it. Show it.)
+    if (box) {
+      if (body.visible === false && !inside()) body.visible = true;
+      const only = (name) => plan.every(a => a.do === 'routine' && a.name === name);
+      if (atHome()) {
+        if (only('home')) return true;
+        plan = [{ do: 'routine', name: 'out' }, ...plan.filter(a => !boxy(a))];
+      }
     }
     let noRoutine = null;
     plan = plan.flatMap(a => a.do !== 'routine' ? [a] : ROUTINES[a.name] ? ROUTINES[a.name]() : (noRoutine = a.name, []));
@@ -260,19 +288,21 @@ export function makeBrain(sim, rig, camera, props = null) {
       return [...go, ...p.plan()].map(b => ({ ...b, for: a.target }));   // `for`: the page names the errand
     });
     if (unknown) { fail(`unknown prop "${unknown}" — have: ${props ? props.ids.join(', ') : 'none'}`); return false; }
+    if (box && opening() && !atHome() && !plan[0].box && plan[0].for !== 'box') plan = [...tidy(), ...plan];
     plan = facing(plan);
     for (const a of plan) if (!ACTIONS[a.do]) { fail(`unknown action "${a.do}"`); return false; }
     // a walk the new plan does not continue must stop: the next action waits for a
     // standing hand, and nothing else would zero the sim's walk command
     if (st.i >= 0 && !/^walk/.test(plan[0].do)) sim.autoWalk(0, 0);
+    orphan();
     st.plan = plan.map(a => ({ ...a, t: 0 }));           // copy: ticking mutates
-    st.i = 0;
+    st.i = 0; st.error = null;
     st.tag = tag;                                        // idle behaviors show 'idling', not 'acting'
     setStatus(tag ? 'idling' : 'acting', tag ?? `1/${plan.length} ${plan[0].do}`);
     return true;
   }
   function stop() {
-    if (st.i >= 0 || st.status !== 'idle') { sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); }
+    if (st.i >= 0 || st.status !== 'idle') { orphan(); sim.autoWalk(0, 0); st.i = -1; st.tag = null; setStatus('idle'); }
   }
 
   // ---- ONE command layer: keys, clicks, voice and idle behaviors all enter here.
@@ -325,6 +355,7 @@ export function makeBrain(sim, rig, camera, props = null) {
     if (ok) pokes = (pokes + 1) % POKES.length;          // a poke that was outranked did not happen
     return ok;
   }
+  const soothe = () => { pokes = 0; pokedAt = -1e9; };    // petted: the pokes are forgiven
 
   // ---- idle behaviors: compound plans when the USER goes quiet. Tracks its own
   // user-inactivity clock — the sim's lastInput is useless here because the
@@ -387,6 +418,15 @@ export function makeBrain(sim, rig, camera, props = null) {
     // that comes back replaces it (a gesture cut short eases out)
     if (asking && st.i < 0 && bClock >= thinkAt && !sim.s.gesture && !sim.s.airborne
         && sim.s.speed <= C.V_MOVE && sim.gesture('thinking')) thinkAt = bClock + GESTURES.thinking.dur + THINK_GAP;
+    if (trail) {                                         // marks of a gesture whose plan is gone
+      const g = sim.s.gesture, on = g && g.name === trail.name;
+      while (trail.k < trail.at.length && (!on || g.t >= trail.at[trail.k][0])) mark(trail.at[trail.k++][1]);
+      if (trail.k >= trail.at.length) trail = null;
+    }
+    // stopped with the box open (a typed "stop", a key let go): it tidies up after a moment
+    if (st.i < 0 && boxOpen && !trail && !sim.s.gesture && body.visible !== false && bClock - planAt > 1) {
+      if (inFront()) command(tidy(), { source: 'auto', tag: 'stepping out' }); else mark('boxShut');
+    }
     if (st.i < 0) return;
     planAt = bClock;
     const a = st.plan[st.i];
@@ -407,7 +447,7 @@ export function makeBrain(sim, rig, camera, props = null) {
 
 Reply ONLY with JSON (no markdown): {"say":"...","plan":[...]}
 "plan" is a sequence of actions, executed in order:
-- {"do":"gesture","name":"..."} — yes (nod), no (sits up and wags a finger), shake (a quick cross shake of the whole body), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), peek (stand tall and look about), startle (a flinch), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (settle down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive (a slap on the glass), snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
+- {"do":"gesture","name":"..."} — yes (nod), no (sits up and wags a finger), shake (a quick cross shake of the whole body), idk (shrug), wave (hello/goodbye), laugh, bow, point (at what's ahead), beckon (come here), thinking (hmm), peek (stand tall and look about), startle (a flinch), tap (impatient drumming), thumbsUp (strong approval/success), thumbsDown (strong disapproval/failure), flipBird (rude/dismissive — use RARELY, only for a joking insult or a clearly hostile request, never at the user unprompted), sleep (lie down for a 16s nap — for "take a nap", "go to sleep", "rest"), peace, horns, fingerGun, highFive (a slap on the glass), snap, doubleSnap (your remote: it works the light switch from anywhere), knock (rap on the glass)
 - {"do":"walkTo","x":X,"z":Z,"speed":S} — walk to a WORLD position in your room (preferred for going places). "speed" (u/s): ~0.8 relaxed default, ~1.6 jog, ~3-3.4 FULL SPRINT — sprint when told to hurry/run/race or when excited.
 - {"do":"walk","forward":F,"right":R,"speed":S} — walk a relative offset in YOUR body frame (for "back up a bit", "come closer"); negative allowed. You end up facing your travel direction.
 - {"do":"turn","deg":D} — positive = left; you pivot in place (no translation) — fast, use it freely for "turn around", "face me", "look this way"
@@ -558,7 +598,7 @@ Keep plans ≤ 12 actions. Impossible or nonsense requests → gesture no or idk
       }
     }
   }
-  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, react, rpsPick, get rps() { return round; }, mute: (m) => { muted = m; },
+  return { st, run, stop, tick, ask, speak, behave, command, cancel, loadLocal, poke, soothe, react, rpsPick, get rps() { return round; }, mute: (m) => { muted = m; },
     get idle() { return st.i < 0 && st.status === 'idle'; },
     behaviors: BEHAVIORS.map(b => b.name), routines: Object.keys(ROUTINES),
     get needsLocal() { return llmDown && local.supported && !local.ready; } };

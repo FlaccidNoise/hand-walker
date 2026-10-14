@@ -11,9 +11,10 @@
 //   towed     any leg dragged planted at err>0.15 for >0.5s none
 //   clear     worst swing peak / carried-digit clearance (u)   >= 0.10
 //   touchdown tip travel in the landing sim step (u)           <= 0.035
-//   tipJump   largest tip move in one sim step, on the ground  <= 0.15 (hopScuttle, at 120 Hz).
-//             A swing step runs to 0.07. A digit towed out of reach and thrown by the
-//             ground constraint moved 0.32
+//   tipJump   largest tip move in one sim step, on the ground  <= 0.20 (0.15 hopScuttle), at 120 Hz.
+//             A swing step runs to 0.07, a rescue swing at a run to 0.14. A digit towed out
+//             of reach and thrown by the ground constraint moved 0.32; a swing that changed
+//             elbow branch as it lifted (braking from a sprint) was thrown 0.82
 // KNOWN_RED scenarios are allowed to fail (named, with the reason); every other one
 // must pass. The gate runs on a virtual clock, so results are bit-reproducible.
 
@@ -23,7 +24,7 @@ const CRIT = { slide: 0.5, slidePerU: 0.10, gap: 0.40, floor: -0.01, tipErrP95: 
   clear: 0.10,     // every swing peak and every carried digit clears the floor by this
   plantedMin: 2, bodyBob: 0.06,     // pivot180 only: support never drops, the wrist does not hop
   tipStep: 0.16, returnErr: 0.02,   // gestures only: no digit snaps, every tip comes back to rest
-  touchdown: 0.035,
+  touchdown: 0.035, tipJump: 0.20,
   restErr: 0.10, stopSettle: 0.7 }; // stop only: feet end on their rest spots, all motion over in this many s               // tip travel in the landing sim step: placed, not scuffed (was 0.054-0.070)
 // a pivot re-steps every digit ~10 times: its slide bar is its own (0.034 per stance)
 const SLIDE = { pivot180: 2.0 };
@@ -212,14 +213,14 @@ function makeRecorder(H) {
         cmdEnd: L.tStop != null ? +(L.tStop - L.t0).toFixed(2) : null,   // sim s until the last command ended
       };
       const fails = [];
-      const G = name === 'gestures' || name === 'gestureCut';   // digits are posed, not stepping: gait bars do not apply
+      const G = name === 'gestures' || name === 'gestureCut' || name === 'hoverWake';   // digits are posed, not stepping: gait bars do not apply
       // travel scenarios are judged per unit walked (a long run is not worse than a short
       // one); in-place scenarios keep the absolute bar
       if (!G && m.slidePerU != null && L.dist > 4) {
         if (m.slidePerU > (SLIDE_PER_U[name] ?? CRIT.slidePerU)) fails.push(`slide/u ${m.slidePerU}`);
       } else if (!G && m.slide >= (SLIDE[name] ?? CRIT.slide)) fails.push(`slide ${m.slide}`);
       if (G && m.tipStep > CRIT.tipStep) fails.push(`tip snap ${m.tipStep} (${L.stepWho})`);
-      if (TIP_JUMP[name] && L.jumpSteps === 1 && m.tipJump > TIP_JUMP[name]) fails.push(`tip jump ${m.tipJump} (${L.jumpWho})`);
+      if (!G && L.jumpSteps === 1 && m.tipJump > (TIP_JUMP[name] ?? CRIT.tipJump)) fails.push(`tip jump ${m.tipJump} (${L.jumpWho})`);
       if (m.touchdown > (TOUCH[name] ?? CRIT.touchdown)) fails.push(`touchdown ${m.touchdown} (${L.touchWho})`);
       if (name === 'stop' && m.stopSettle > CRIT.stopSettle) fails.push(`settle ${m.stopSettle}s`);
       if (name === 'pivot180') {
@@ -295,7 +296,7 @@ const SCENARIOS = {
   async gestureCut(H) {
     const tips = () => F.map(f => H.rig.digits[f].tip.getWorldPosition(new H.THREE.Vector3()));
     const rest = tips(), bad = [];
-    for (const [name, ms] of [['bow', 600], ['point', 500], ['dance', 1300], ['tap', 400], ['sleep', 1500], ['knock', 700], ['laugh', 300], ['idk', 300]]) {
+    for (const [name, ms] of [['bow', 600], ['point', 500], ['dance', 1300], ['tap', 400], ['thinking', 1500], ['knock', 700], ['laugh', 300], ['idk', 300]]) {
       if (!H.gesture(name)) bad.push(`${name} refused over a stance gesture`);
       await sleep(ms);
     }
@@ -308,6 +309,26 @@ const SCENARIOS = {
     const back = Math.max(...tips().map((p, i) => p.distanceTo(rest[i])));
     if (back > CRIT.returnErr) bad.push(`ends ${back.toFixed(3)} off rest`);
     if (!F.every(f => H.sim.legs[f].mode === 'stance')) bad.push('leaves a digit unplanted');
+    return bad;
+  },
+  // a long hover woken by an input: asleep, a key mid-hold has it up in 2 s; playing dead,
+  // one on the way down has it up in 4 (it reaches the floor first). No digit snaps
+  // (tipStep), and it ends standing on its rest spots
+  async hoverWake(H) {
+    const tips = () => F.map(f => H.rig.digits[f].tip.getWorldPosition(new H.THREE.Vector3()));
+    const rest = tips(), bad = [];
+    for (const [name, at, within] of [['sleep', 4000, 2.0], ['playDead', 1300, 4.0]]) {
+      if (!H.gesture(name)) bad.push(`${name} refused`);
+      await sleep(at);
+      const t0 = H.sim.s.time;
+      if (H.gesture('yes')) bad.push(`${name} was cut, not woken`);
+      let up = null;
+      for (let i = 0; i < 160 && up == null; i++) { await sleep(50); if (!H.sim.s.gesture && F.every(f => H.sim.legs[f].mode === 'stance')) up = H.sim.s.time - t0; }
+      if (up == null || up > within) bad.push(`${name} woken: up after ${up == null ? 'over 6' : up.toFixed(2)} s (want ${within})`);
+      const back = Math.max(...tips().map((p, i) => p.distanceTo(rest[i])));
+      if (back > CRIT.returnErr) bad.push(`${name} ends ${back.toFixed(3)} off rest`);
+      H.sim.s.lastInput = H.sim.s.time;
+    }
     return bad;
   },
   async pivot180(H) { H.pivot(90); await sleep(2200); H.pivot(90); await sleep(2200); },   // two stepping pivots
@@ -325,27 +346,19 @@ const SCENARIOS = {
   // the click-to-walk path: four brain walkTo legs with 90° course changes (on the
   // flat side of the room: the step at (0, 2.4) is a terrain test, not a gait one)
   async clickWalk(H) {
-    let berr = null;                                         // a brain error arrives through onsay
-    const page = H.brain.st.onsay;
-    H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
     // (x stops at 2.4: at 3 the second corner stood inside Thing's box, and the brain now
     // ends a walk clear of it, which bent the square)
     H.brain.run([{ do: 'walkTo', x: 2.4, z: 0, speed: 0.8 }, { do: 'walkTo', x: 2.4, z: -3, speed: 0.8 },
       { do: 'walkTo', x: -0.6, z: -3, speed: 0.8 }, { do: 'walkTo', x: -0.6, z: 0, speed: 0.8 }]);
     for (let i = 0; i < 400 && H.brain.st.i >= 0; i++) await sleep(100);
-    H.brain.st.onsay = page;
-    if (berr) throw new Error('clickWalk: brain ' + berr);
+    if (H.brain.st.error) throw new Error('clickWalk: brain ' + H.brain.st.error);
   },
   // a hop-turn straight into a scuttle (go and ring the bell, from rest): the first strides
   // of a trot. A digit held down past its reach by the support guard was thrown 0.32 u
   async hopScuttle(H) {
-    let berr = null;
-    const page = H.brain.st.onsay;
-    H.brain.st.onsay = (t, k) => { if (k === 'error') berr = t; if (page) page(t, k); };
     H.brain.run([{ do: 'walkTo', x: -3.2, z: 3.2, speed: 1.8 }]);
     for (let i = 0; i < 100 && H.brain.st.i >= 0; i++) await sleep(100);
-    H.brain.st.onsay = page;
-    if (berr) throw new Error('hopScuttle: brain ' + berr);
+    if (H.brain.st.error) throw new Error('hopScuttle: brain ' + H.brain.st.error);
   },
   // walk, stop, hold: the hand must halt fast, finish IN its stance, and then be still
   async stop(H) {

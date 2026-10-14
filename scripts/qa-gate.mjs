@@ -63,7 +63,8 @@ try {
   if (save) writeFileSync(save, JSON.stringify(Object.fromEntries(rows.map(r => [r.name, r.metrics])), null, 1) + '\n');
   const bad = rows.filter(r => !r.pass && !known[r.name]);
   const healed = rows.filter(r => r.pass && known[r.name]);
-  for (const r of healed) console.log(`note: ${r.name} passes now — remove it from KNOWN_RED in qa.js`);
+  // a known red may be red at one rate only (spam: 120 Hz). 120 Hz is the rate the list is kept at
+  if (hz === 120) for (const r of healed) console.log(`note: ${r.name} passes now — remove it from KNOWN_RED in qa.js`);
   console.log(`qa-gate @${hz}Hz: ${rows.filter(r => r.pass).length}/${rows.length} pass, ` +
     `${rows.filter(r => !r.pass && known[r.name]).length} known red, ${bad.length} unexpected in ` +
     `${((Date.now() - t0) / 1000).toFixed(0)}s → ${bad.length ? 'RED' : 'GREEN'}`);

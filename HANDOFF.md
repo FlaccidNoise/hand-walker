@@ -1,128 +1,172 @@
-# Handoff — Thing walk, control, props
+# Handoff — the polish pass: room, page, character
 
-**Date:** 2026-10-10
+**Date:** 2026-10-13
 **Project:** hand-walker (`~/CodingProjects/hand-walker`)
 
 ## State
 
-hand-walker is the only hand project. `procedural-hand-animation` was the donor
-for click-to-walk, props, the rules parser and the in-browser model. The plan is
-`docs/plans/2026-10-09-thing-walk-and-control.md`. Research is in
-`docs/research/`. Tasks 1–23 are built.
+hand-walker is the only hand project. The website builds from it:
+`personal-website/scripts/build-demos.mjs` copies `index.html main.js qa.js src vendor assets`
+into `public/demos/hand-walker/`. To redeploy: `node scripts/build-demos.mjs hand-walker`
+in `personal-website`, commit, push. The site caches `/demos/*/assets/*` for a year.
 
-Josh watched it on 2026-10-10: "already looking pretty good", and asked for more
-fun. The fun pass below is the answer. He has not yet watched the fun pass.
+On 2026-10-13 Josh asked for a full review and polish of look, feel, function and
+performance. Three review agents (look, interaction, character) each wrote a report, then
+built their own proposal in a worktree. Everything is merged to `main` locally.
 
-The website builds from this repo: `personal-website/scripts/build-demos.mjs`
-copies `index.html main.js qa.js src vendor assets` into
-`public/demos/hand-walker/`. To redeploy: `node scripts/build-demos.mjs hand-walker`
-in `personal-website`, commit, push. The site caches `/demos/*/assets/*` for a year:
-if the hand model changes, give the file a new name.
-
-The hand stands tall with the palm 34° nose-down and the stump up. It struts on
-0.61 u steps, scuttles on 0.80 u steps, stops hard into its stance, and turns
-by stop, pivot, go. A turn over 100° is one hop. It is driven by clicks, keys,
-typed or spoken text, on-page buttons, and idle behaviors through one command layer.
+**Nothing from this pass has been pushed or deployed. Josh has not seen or heard it.**
+He also had not watched the 2026-10-10 fun pass. Pushing either repo needs his yes.
 
 ## Verify
 
 ```bash
 npm run serve          # dev server on 127.0.0.1:8741 (serve.py: static + /llm + /tts)
-npm test               # unit (51) → calibration → matrix at 120 Hz → matrix at 60 Hz → behave-check
-node scripts/behave-check.mjs   # every idle behaviour, routine and poke runs start to finish with no brain error
+npm test               # unit (88) → calibration → matrix at 120 Hz → matrix at 60 Hz → behave-check (61 plans)
 node scripts/qa-gate.mjs [scenario] [--hz N] [--save file.json]
-node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME
+node scripts/behave-check.mjs
+node scripts/film.mjs --run "h.autoWalk(0.8,0)" --view sideL --label NAME     # contact sheet, ?dev view
+node scripts/reel.mjs --cues cues.mjs --out x.mp4                             # video of the SHIPPED page
 ```
 
-- The matrix runs on a **virtual clock**. It is bit-reproducible and takes 15 s.
-  Baseline: 14/16 pass, 2 known red (`KNOWN_RED` in `qa.js`, each with its reason).
-  `rest` slide must read exactly 0.
-- `test/look.baseline.json` holds every metric of the last accepted run.
-- `scripts/film.mjs` writes a contact sheet to `.debug/`. Look at it. Numbers and
-  pixels catch different bugs.
-- The page loads `qa.js` and binds R/P only with `?dev` in the URL.
+- Baseline: matrix 16/18 at 120 Hz, 17/18 at 60 Hz. Known red: `jumpRun`, and `spam` at 120 Hz only.
+  Calibration is bit-exact. `rest` slide must read exactly 0.
+- `scripts/reel.mjs` drives the real page (not `?dev`) with real pointer and key events on the
+  virtual clock. About 1.5 s of wall time per second of video. Sheets:
+  `ffmpeg -i x.mp4 -vf "fps=2,scale=640:-1,tile=4x4" -frames:v 1 sheet.png`.
+- A tool that places the camera itself must set `window.__hand.view.hold = true`.
+- `?dev` shows the gates' view: the bump field outside the room, the wide shadow frustum,
+  `qa.js`, the R/P keys and the backtick orbit. The shipped page shows the room alone.
 
-## Numbers (120 Hz gate, start of this work → now)
+## Numbers (120 Hz gate, start of this pass → now)
 
 | Metric | Before | Now |
 |---|---|---|
-| Standing wrist excursion at 60 Hz | 5.6 u (sim diverged) | 0 |
-| Wrist height, palm pitch | 0.886 u, 9° | 1.40 u, 34° |
-| Walk step length (trot) | 0.435 u (0.54) | 0.61 u (0.80) |
-| Footfalls per u, walk | 10.4 | 8.0 |
-| Slide per u, straight walk | 0.089 | 0.065 |
-| Thumb swing clearance, carried thumb | 0.031, 0.000 | 0.17, 0.20 |
-| Pivot start: min planted, wrist hop | 0, 0.84 u | 2, 0 |
-| turnCycle slide (red since July) | 6.94 | 0.41, green |
-| Click-walk slide per u | 0.47 | 0.12 |
-| Touchdown tip speed, walk | 0.054 u per step | 0.015 |
-| First lift after a command | 0.24 s | 0.044 s |
-| Stop from 0.8 u/s: settled, feet off rest | 1.29 s, up to 0.32 u | 0.56 s, ≤ 0.08 u |
-| Gate run time, reproducible | 200 s, no | 15 s, yes |
+| Fingers through a wall, worst case (sprint at it) | 0.72 u through | 0.18 u clear |
+| Tip jump in one sim step, every trot start | 0.31 u | 0.08 u |
+| Tip jump at the stop after a sprint (pinky) | 0.82 u | 0.14 u |
+| Body rear-back at every walk start | 0.224 rad (a bug) | 0.083 rad (one wind-up kick) |
+| turnCycle slide, finger gap | 0.41, 0.41 | 0.31, 0.82 |
+| clickWalk touchdown speed | 0.041 | 0.027 |
+| A key or a poke during a click-walk | hand walks out of the room | walk stops, action plays |
+| Idle picks that move the hand under 2 px on screen | 46% of weight | 0 |
+| Thumbs-up thumb, off vertical on screen | about 30° | under 6° |
+| Triangles drawn per frame | 10.9 k | 6.5 k before the box was dressed |
+| Unit tests, behave-check plans | 51, 20 | 88, 61 |
 
-## How it works now (what is new)
+## What changed
 
-- **Fixed step.** The loop feeds the sim 6.25 ms steps. The support spring diverges past 7.9 ms.
-- **Posture.** `POSTURE_PITCH` (-0.6). `calibrate()` derives lanes, rests, stand height, and bands at that pitch. `?dev&pitch=-0.45` tries another.
-- **Per-digit duty** (`src/gait.js`). One cadence. Each digit stays down as long as its own band allows at the current speed. The longest band sets the stride. Cadence floor 0.9 Hz.
-- **Footfall patterns** were chosen by simulating every pattern on a 0.1 grid and ranking by finger-shaft clearance, planted count, and slide. Each gait has an entry phase so starts and gait changes replay checked footfalls.
-- **Starts and stops.** `STOP_DECEL`, landing on the rest spot under the predicted halt pose, settle steps.
-- **Turn policy lives in the sim.** A command more than `TURN_PIVOT` off the heading brakes, steps home, pivots, and goes. Over `HOP_TURN` it hops.
-- **Body springs** carry twitches: footfall nod, start lean, stop nod.
-- **Command layer.** `brain.command(plan, {source})`. Sources rank key > click > voice > auto.
-- **Text.** `src/rules.js` answers plain commands with no model. A local Gemini proxy answers the rest. On a static host the in-browser model (`src/llm.js`, Web-LLM pinned to 0.2.85) loads after the person presses "load brain (340 MB)".
-- **Props** (`src/props.js`): switch, bell, ball, rug. `{do:'use',target}`.
+### Look (`src/scene.js`, `src/paint.js`, `src/props.js`, `src/rig.js`)
 
-## The fun pass (2026-10-10)
+- The room is a shadow box on a dark table: oak boards, bottle-green striped paper over
+  walnut wainscot, brass, one warm sconce against moonlight through the door. Every
+  texture is painted on a canvas at startup (`src/paint.js`, about 8 ms). No asset files.
+- The bump field and its wire draw only under `?dev`.
+- The hand casts and takes shadows. Its skin is a painted map: nails, knuckle and joint
+  creases, palm lines, pink pads, a stitched scar ring at the wrist.
+- Lights off is sconce plus moon, never black. The key turns to moonlight, so the hand
+  keeps a shadow. The switch toggle glows in the dark.
+- The door's moonlight patch takes the hand's shadow. Dust drifts in the beam.
+- Props restyled: striped ball, patterned rug, a piano with black keys, a book for the step.
+- Camera: FOV 36 on a wide window, a higher rig on an upright phone, blended by aspect.
+  `aim()` slides the view's target toward the hand and dollies to 0.72 while a gesture
+  plays. The wheel and a pinch dolly to 0.5. Azimuth and elevation never change, so the
+  brain's screen directions hold. `prefers-reduced-motion` turns the follow, the push-in,
+  the shake, the dust and the sconce flicker off.
 
-- **Floor piano** along the west wall. `sim.onStep(f, foot)` fires at each touchdown
-  and `props.footfall` plays the key under the fingertip. On bare floor it is a soft tick.
-- **Sound** is synthesised in `src/props.js` and gated by `audio.on`, which the page
-  sets on the first key or pointer press. The headless gates never set it. M mutes.
-- **Poke**: a click within 0.6 u of the palm calls `brain.poke()`. Giggle, jump, wag,
-  tap, then the `sulk` routine. The count resets after `POKE_FORGET` (10 s).
-- **Cursor awareness** (`notice` in `src/input.js`): a mouse that rests on the floor for
-  1.6 s gets a turn and a point, and after 5 s more the hand walks over. `auto` source.
-- **Gestures**: `dance` (beat cues), `knock` (camera shake cue), `playDead`, and
-  `morseGesture(text)`, which builds a tap track from text (8 characters at most).
-- **Brain**: `{do:'morse',text}`, `{do:'routine',name}` with `dance`, `knock`, `sulk`,
-  and seven idle behaviours that use the room. Behaviours start after 14 s of quiet.
-- **A new gesture replaces a running stance gesture.** The old body pose eases out over
-  `GESTURE_CUT`. A hover finishes first and lifts off from the settled stance only.
-  Gate scenario `gestureCut` holds this.
-- **Page**: button row (`#keys`), phone layouts, and the camera backs off on a narrow
-  screen so the room fits. The numbers HUD shows only with `?dev` or the backtick.
-- `bow` and `sleep` are re-authored for the tall stance. Pitch +0.3 holds on the
-  planted digits (err 0.039). At +0.35 they re-step.
-- Voice is not offered when the host blocks the microphone. joshtaylor.world does,
-  with `Permissions-Policy: microphone=()` in `personal-website/netlify.toml`.
+### Page (`index.html`, `src/ui.js`, `src/input.js`)
 
-## Findings worth keeping
+- Page wiring moved out of `main.js` into `src/ui.js`.
+- A caption above the hand: line 1 is what it does ("off to ring the bell"), line 2 is
+  what it says or a notice, on its own timer.
+- Cards, a palette of every command ("more…", or type "help"), one text box with a
+  hold-to-speak button, a sound button with three states, a help panel.
+- States: the room draws while the hand loads ("Waking the hand…"). A rig failure or no
+  WebGL shows a card with "Try again". The model download has its own progress bar.
+- Hover: pointer cursor, a brass ring, a label ("bell · click to ring"). On touch a tap
+  near a small thing counts as on it.
+- New input: hold and drag to lead the hand, rub to pet, hold on the hand for a high five,
+  drag off the hand to fling, drag the ball to throw, pinch to dolly, R P S during a round.
+- It notices you leave: the mouse off the page for 2.5 s, or the tab hidden for 20 s.
+- First-run hints, and a knock on the glass after 6 s for a visitor who only watches.
 
-- **The cross metric lied.** Hand-z lane order reads a pinky planted behind and outside the ring as a crossing. The gate now measures capsule distance between neighbouring finger shafts (`gap`, in flesh radii).
-- **Body bob and acceleration lean cost grip.** Bob per lifted digit: slide +10–30%, stop settle 0.56 → 1.35 s. Lean: run slide +25%. Both A/B'd and removed. Twitch impulses are free.
-- **A stepping pivot tops out near 1.5 rad/s.** The finger-yaw cone limits the arc a planted foot may sweep to about 0.16 rad. Faster pivots scrub and clash. That is why big turns hop.
-- **Pivots must start from the settled stance.** Starting mid-stride gave finger gap 0.18. Waiting for the feet to step home gave 0.86.
-- **Start-up transients depend on the phase the cycle is entered at.** A pattern that is clean in steady state clashed on start from the wrong phase. Hence per-gait entry phases.
-- **Jump energy scales with planted digits.** A jump issued mid-step reached 1.68 u of 2.32 u. The brain's jump waits for five planted.
-- **Hover gestures must open the fist in the air** and only then lower the hand. A fist carried to the floor threw digits 0.6–1.6 u in one step.
-- **Taps strike from `base: 'rest'`** (the digit's own stance angles), not by leaning on the ground constraint.
-- **The pinky cannot splay wide at this posture.** 0.3 rad of lane splay moved its tip 0.05 u and more broke the stance. Not pursued.
+### Character (`src/gestures.js`, `src/brain.js`)
+
+- The perch: the hand rears up on its stump, palm to the viewer. Wave, no, peace, horns,
+  high five, the rude one and rock paper scissors all sit on it. Signs face the viewer first.
+- Stance gestures re-authored to read at the app's scale: yes, laugh, point, bow, shrug,
+  thinking, tap, knock, dance. Idles that could not be seen are cut.
+- The room answers back: startle when the lights go out, a reaction to the bell and the ball.
+- A jump crouches first and squashes on landing.
+- A head-cock while a question is out with the model.
+- Thing's box (`use box`, "go home", "come out"): the hand walks in, lies down, the box
+  shuts. Any command brings it out first. A command at any moment of either sequence ends
+  with hand and box in agreement (61-plan behave-check holds this).
+- Rock paper scissors: `{do:'rps'}`, `brain.rpsPick(sign)`, `brain.rps`.
+- A click or a key wakes a nap or play dead. The nap is a lie-down on the rug.
+
+### Sim (`main.js` makeSim): three small fixes, each with a gate criterion
+
+- A digit held down past its reach by the support guard may take its open phase slot
+  (4 lines). New scenario `hopScuttle`, new metric `tipJump`.
+- A finger's swing keeps the elbow branch it left the floor with (1 line).
+- `stopKick` arms on real speed, plus one deliberate wind-up kick on a start.
+- A hover def may name its held span (`hold`), which any input skips: the wake.
+
+### Contracts worth knowing
+
+- Brain status is `idle | acting | idling | thinking`. Words go out through
+  `brain.st.onsay(text, kind)`, kind `say | notice | error`. A failed plan sets `st.error`,
+  which `qa.js` and `behave-check.mjs` read.
+- Expanded `use` actions carry `for: <prop id>`. The model download reports through `st.onload`.
+- `ROOM.half` 3.9 = `ROOM.wall` 5.75 − 1.85. The clamp is on the wrist and the fingers
+  lead it by up to 1.67 u.
+- `initUI` must be registered before `initInput` (R P S are swallowed before S walks).
+
+## Findings worth keeping (new this pass)
+
+- **Finger-only motion does not read at the app's scale.** The hand was about 130 px tall
+  and digit tracks moved 1 to 6 px. Body-scale motion, the perch and the push-in fixed it.
+- **The gimbal, not "roll only", limits hover pitch.** Total body pitch stays within ±1.2 rad.
+- **Every new three.js object draws 4 `Math.random` for its uuid.** One more object at
+  startup shifts the seeded stream and moves behave-check plan TIMES. That is not a regression.
+- **A status value removed by one change can make a gate check pass for good.** After the
+  `error` status went, `clickWalk` could not fail. Prove a gate still goes red.
+- **`mesh.bindMatrixInverse` is the inverse of the WORLD matrix in attached mode.** Joint
+  frames for painting come from `boneInverses × bindMatrix`.
+- **Gesture marks must outlive their plan.** The box was worked by marks on a gesture action.
+  A replaced plan took them with it while the hover played on.
+- **Parallel agents:** one worktree and one server port each (`.claude/worktrees/<name>`,
+  `URL=http://localhost:<port>/index.html`). Stop servers by pid, never by port.
+
+Findings from 2026-10-10 still hold (the `gap` metric, bob and lean cost grip, pivots start
+from the settled stance, hover fists open in the air, taps strike from `base: 'rest'`).
+They are in git history: `git show 5c37738:HANDOFF.md`.
 
 ## Open
 
-0. **Never run on a real phone or in Safari.** Taps, the phone layout and the audio unlock were checked in headless Chrome only.
-1. **Look pass on the fun pass.** Sound levels were set without ears: nobody has heard the footfall ticks, the piano, the dance beat or the Morse beeps yet.
-2. **Voice on the website** needs `microphone=(self)` for `/demos/hand-walker/*` in `personal-website/netlify.toml`. Josh's call: the site review switched it off on purpose.
-3. `jumpRun` red: ring and pinky pads overlap on the first strides after a running jump lands.
-4. `spam` red at 90 Hz only (chaos input).
-5. Pivots borrow the travel footfall patterns (finger gap 0.42–0.50). A pivot-specific pattern search is the fix.
-6. The pinky re-steps twice during `dance` (roll plus bounce reach its limit). It reads as part of the dance.
-7. The stump is rigid with the palm. A stump bent further upright would match the films more closely (geometry bake at rig time).
-8. Backlog in `docs/research/interaction-ideas.md`: Thing's box, chess, the ransom note, grab-and-carry, a phonograph.
+0. **Nobody has seen this on a real GPU in motion, a real phone, Safari or Firefox.**
+   Every picture and film came from headless Chrome with software rendering.
+1. **Nobody has heard any of it.** Every sound level is set blind, including the new cues.
+2. **Not exercised for real:** the microphone, a real `/llm` or `/tts` call, the 340 MB
+   model download, touch with real fingers (pinch, rub, fling), the tab-return greeting.
+3. **Josh's calls:** the page heading is "Thing" and the tab title is "Hand Walker".
+   Skin tone `#d9b29a`. A stitched stump (2022 series) or a bare one (1991 film).
+4. Voice on the website needs `microphone=(self)` in `personal-website/netlify.toml`.
+5. `jumpRun` red: ring and pinky pads overlap after a running jump lands. `spam` red at 120 Hz.
+6. A click-walk with a turn that is not 90° fails the finger-gap bar.
+7. The mesh is faceted at the knuckles in the perch poses (1360 vertices). Paint cannot fix it.
+8. The stump is rigid with the palm: it cannot look at things (needs a bone or a vertex bend).
+9. A dragged ball does not follow the pointer. A missed high five has no feedback.
+10. Not built: mood that persists, the fingertips-over-the-rim box idle, the box as the
+    loading state, the ransom note, chess, the phonograph, fetch and carry
+    (`docs/research/interaction-ideas.md`).
 
 ## Context and warnings
 
 - Dev server binds 127.0.0.1. `/llm` and `/tts` need `GEMINI_API_KEY` in the shell that starts it.
-- The in-browser model was run for real in headless Chrome with WebGPU: "stroll over to the doorway and then give me a wave" gave walkTo door + wave.
+- ES modules do not hot-reload: hard-reload the tab after a change.
+- Review reports and build notes from this pass were written to the session scratchpad,
+  not the repo. The decisions they led to are in the commit messages.
 - Commits: `--no-verify`, no Co-Authored-By, one commit per verified milestone.
+- Branches `polish/look`, `polish/ui`, `polish/char` and their worktrees are merged and kept
+  as rewind targets. Remove with `git worktree remove .claude/worktrees/<name>`.
