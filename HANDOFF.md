@@ -12,10 +12,14 @@ in `personal-website`, commit, push. The site caches `/demos/*/assets/*` for a y
 
 On 2026-10-13 Josh asked for a full review and polish of look, feel, function and
 performance. Three review agents (look, interaction, character) each wrote a report, then
-built their own proposal in a worktree. Everything is merged to `main` locally.
+built their own proposal in a worktree. Everything is merged to `main`.
 
-**Nothing from this pass has been pushed or deployed. Josh has not seen or heard it.**
-He also had not watched the 2026-10-10 fun pass. Pushing either repo needs his yes.
+**Shipped 2026-10-13 on Josh's word, after he watched the before/after film and the tour.**
+`hand-walker` main is pushed at `4c5ac7d`. The site carries that build as
+`personal-website` `8025ed2`, live at https://joshtaylor.world/projects/hand-walker/demo/.
+The live page was checked in headless Chrome: it loads in the site's frame, a click walks
+the hand, a typed "ring the bell" runs from the keyword rules, no console error, no 4xx.
+The site's project page has a new still and the current gate count.
 
 ## Verify
 
@@ -151,7 +155,8 @@ They are in git history: `git show 5c37738:HANDOFF.md`.
    model download, touch with real fingers (pinch, rub, fling), the tab-return greeting.
 3. **Josh's calls:** the page heading is "Thing" and the tab title is "Hand Walker".
    Skin tone `#d9b29a`. A stitched stump (2022 series) or a bare one (1991 film).
-4. Voice on the website needs `microphone=(self)` in `personal-website/netlify.toml`.
+4. Voice is off on the website: its `Permissions-Policy` header sends `microphone=()` and the demo
+   hides its microphone button. Voice there needs `microphone=(self)` in `personal-website/netlify.toml`. Josh's call.
 5. `jumpRun` red: ring and pinky pads overlap after a running jump lands. `spam` red at 120 Hz.
 6. A click-walk with a turn that is not 90° fails the finger-gap bar.
 7. The mesh is faceted at the knuckles in the perch poses (1360 vertices). Paint cannot fix it.
@@ -170,5 +175,7 @@ They are in git history: `git show 5c37738:HANDOFF.md`.
 - Review reports and build notes from this pass were written to the session scratchpad,
   not the repo. The decisions they led to are in the commit messages.
 - Commits: `--no-verify`, no Co-Authored-By, one commit per verified milestone.
+- The site's deploy run can fail once on `tests/writing.spec.ts:99` with no essay change in the
+  push (it did for `8025ed2`). `gh run rerun <id> --failed` passed and deployed.
 - Branches `polish/look`, `polish/ui`, `polish/char` and their worktrees are merged and kept
   as rewind targets. Remove with `git worktree remove .claude/worktrees/<name>`.
