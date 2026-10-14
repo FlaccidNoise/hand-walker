@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { OBSTACLES, CELL, EXTENT, vertexH } from './terrain.js';
 import { ROOM } from './tuning.js';
-import { PAINT, paintStats } from './paint.js';
+import { PAINT } from './paint.js';
 
 // ?dev is the gates' and film.mjs's view: QA walks the bump field outside the room, so
 // that field, its wire and the wide shadow frustum stay. The shipped page shows the room
@@ -19,7 +19,7 @@ const CAM_WIDE = { fov: 36, eye: [9.95, 6.31, 11.99], target: [0, 0.3, 0.3] };  
 const CAM_TALL = { fov: 50, eye: [12.96, 17.06, 15.73], target: [0.9, 0, 1.0] };  // aspect ≤ 0.46. The switch and the bell keep a thumb's width from the screen edge
 const FOLLOW = 0.3, FOLLOW_TALL = 0.35;    // share of the hand's position the view's target takes (wide, + upright phone)
 const CLOSE_K = 0.72, CLOSE_HOLD = 0.9;    // dolly while a gesture plays · s it stays in after one ends
-const ZOOM_MIN = 0.5;                      // nearest wheel dolly, as a share of the home distance
+export const ZOOM_MIN = 0.5;                      // nearest wheel dolly, as a share of the home distance
 
 const std = (color, roughness, o) => new THREE.MeshStandardMaterial({ color, roughness, ...o });
 
@@ -34,7 +34,6 @@ export function buildScene(container) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.userData.paint = paintStats;    // ms spent painting textures (props.js adds its own)
   scene.background = PAINT.sky();
   scene.fog = new THREE.Fog(0x0b0908, 22, 48);               // swallows the table's edge, not the room
 
@@ -134,7 +133,7 @@ export function buildScene(container) {
   };
   window.addEventListener('resize', onResize);
 
-  return { renderer, scene, camera, camHome, view, aim, controls, ground, pmrem, lights: { hemi, key, amb, rim }, dispose: () => { window.removeEventListener('resize', onResize); renderer.dispose(); } };
+  return { renderer, scene, camera, view, aim, controls, lights: { hemi, key, amb, rim } };
 }
 
 // ground: low-poly terrain mesh built by sampling terrain.js's vertexH on the SAME

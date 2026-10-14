@@ -37,7 +37,7 @@ export function makeBrain(sim, rig, camera, props = null) {
   // reports goes out through onsay(text, kind), kind 'say' | 'notice' | 'error', and the
   // in-browser model's download through onload({state, pct, msg}): neither is a status.
   // st.error holds the last plan failure until a new plan starts: the gates read it.
-  const st = { status: 'idle', detail: '', plan: [], i: -1, error: null, onstatus: null, onsay: null, onload: null };
+  const st = { status: 'idle', detail: '', plan: [], i: -1, error: null, onsay: null, onload: null };
   let bClock = 0;                                        // brain time, s sim
   // walls are visual-only in the sim; the brain is the only control path, so every
   // walk target clamps to the room interior and Thing simply never leaves
@@ -47,7 +47,6 @@ export function makeBrain(sim, rig, camera, props = null) {
   const setStatus = (status, detail = '') => {
     st.status = status; st.detail = detail;
     if (status !== 'thinking') asking = false;
-    if (st.onstatus) st.onstatus(st);
   };
   const say = (text, kind = 'say') => { if (st.onsay) st.onsay(text, kind); else if (kind === 'error') console.warn('[brain]', text); };
   const fail = (msg) => { orphan(); sim.autoWalk(0, 0); st.i = -1; st.tag = null; st.error = msg; setStatus('idle'); say(msg, 'error'); };
@@ -68,6 +67,15 @@ export function makeBrain(sim, rig, camera, props = null) {
     const k = box && a.for !== 'box' && !a.box && box.solid;
     if (!k || p.x <= k.x0 - 0.7 || p.z >= k.z1 + 0.5) return p;
     return p.x - (k.x0 - 0.7) < k.z1 + 0.5 - p.z ? { x: k.x0 - 0.7, z: p.z } : { x: p.x, z: k.z1 + 0.5 };
+  };
+  // and a walk from clear ground to clear ground that would cut across the box goes round
+  // its one open corner (a walk into the box or out of it goes straight)
+  const nearBox = (p) => { const k = box.solid; return p.x > k.x0 - 0.7 && p.z < k.z1 + 0.5; };
+  const roundBox = (t) => {
+    const p = body.position;
+    if (!box || nearBox(p) || nearBox(t)) return null;
+    for (let i = 1; i < 20; i++) if (nearBox({ x: p.x + (t.x - p.x) * i / 20, z: p.z + (t.z - p.z) * i / 20 })) return { x: box.solid.x0 - 0.75, z: box.solid.z1 + 0.55 };
+    return null;
   };
   // A plan can be replaced or stopped at any moment, and a hover cannot be cut: the hand
   // goes on lying down, or sitting up, with nobody to shut the box on it or open it. So
@@ -145,14 +153,17 @@ export function makeBrain(sim, rig, camera, props = null) {
           z: body.position.z - f * Math.sin(h) + r * Math.cos(h),
         }), a);
       }
-      const dx = a.target.x - body.position.x, dz = a.target.z - body.position.z;
+      if (a.via === undefined) a.via = roundBox(a.target);
+      if (a.via && Math.hypot(a.via.x - body.position.x, a.via.z - body.position.z) < 0.4) a.via = null;
+      const to = a.via ?? a.target;
+      const dx = to.x - body.position.x, dz = to.z - body.position.z;
       const d = Math.hypot(dx, dz);
       // arrive at speed and stop hard: the sim brakes at STOP_DECEL, so command zero
       // one stopping distance out. No slow creep onto the target. Big course changes
       // are the sim's job too (stop, pivot, go — TURN_PIVOT), for every input path.
       const v = a.speed ?? C.SPEED.strut;
       const stopD = v * (v / (2 * C.STOP_DECEL) + C.ACCEL_TAU);
-      if (a.stopping || d <= stopD + 0.02) {
+      if (a.stopping || (!a.via && d <= stopD + 0.02)) {
         a.stopping = true;
         sim.autoWalk(0, 0);
         return sim.s.speed < 0.03 && sim.s.planted === 5 ? DONE : RUNNING;   // halted and stepped home
@@ -166,7 +177,7 @@ export function makeBrain(sim, rig, camera, props = null) {
         // timeout from INITIAL distance, frozen — recomputing per-tick shrinks it
         // toward the floor as the hand approaches while elapsed keeps growing,
         // spuriously killing long slow walks (bit the napping behavior at 9s)
-        a.tmo = 8 + 3 * Math.hypot(a.target.x - body.position.x, a.target.z - body.position.z);
+        a.tmo = 10 + 3 * Math.hypot(a.target.x - body.position.x, a.target.z - body.position.z);   // +2: it may go round the box
       }
       return ACTIONS.walk(a, dt);                        // reuses walk wholesale
     },
@@ -191,9 +202,9 @@ export function makeBrain(sim, rig, camera, props = null) {
   };
   const TIMEOUT = {
     wait: (a) => (a.s ?? 1) + 1,
-    jump: () => 5,
+    jump: () => 5 + 8,                                     // +8: it may wait out a hover, like gesture
     gesture: (a) => (GESTURES[a.name]?.dur ?? 4) + 8,      // sleep is 16s — dur-aware. +8: it may wait out a hover (playDead, 6 s)
-    morse: (a) => (morseGesture(a.text ?? 'sos')?.dur ?? 4) + 4,
+    morse: (a) => (morseGesture(a.text ?? 'sos')?.dur ?? 4) + 4 + 8,
     walk: (a) => 8 + 2 * Math.hypot(a.forward ?? 0, a.right ?? 0),  // includes a lead-in pivot
     walkTo: (a) => a.tmo ?? 30,
     turn: (a) => 3 + Math.abs(a.deg ?? 90) / 20 + 8,       // +8: it may wait out a hover, like gesture
@@ -274,7 +285,9 @@ export function makeBrain(sim, rig, camera, props = null) {
       }
     }
     let noRoutine = null;
-    plan = plan.flatMap(a => a.do !== 'routine' ? [a] : ROUTINES[a.name] ? ROUTINES[a.name]() : (noRoutine = a.name, []));
+    let goes = false;                                    // "go home and come out": out of the box it went into
+    plan = plan.flatMap(a => a.do !== 'routine' ? [a] : a.name === 'out' && goes ? box.out()
+      : ROUTINES[a.name] ? (goes ||= a.name === 'home', ROUTINES[a.name]()) : (noRoutine = a.name, []));
     if (noRoutine) { fail(`unknown routine "${noRoutine}" — have: ${Object.keys(ROUTINES).join(', ')}`); return false; }
     // {do:'use',target}: go to the prop's anchor, face it, then do what the prop asks for
     let unknown = null;

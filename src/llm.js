@@ -9,7 +9,7 @@ import { GESTURES } from './gestures.js';
 // PINNED: this is remote code running in the page's origin. An exact version, never a
 // floating tag. Checked 2026-10-09: this build exports CreateMLCEngine and knows the model id.
 const WEBLLM = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.85/+esm';
-export const LOCAL_MODEL = { id: 'Qwen3-0.6B-q4f16_1-MLC', size: '340 MB' };
+export const LOCAL_MODEL = { id: 'Qwen3-0.6B-q4f16_1-MLC' };
 
 const PLACES = { center: [0, 0], step: [0, 2.4], corner: [-4, -4], door: [0, -4.2], front: [3.5, 3.5] };
 const S = Math.SQRT1_2;

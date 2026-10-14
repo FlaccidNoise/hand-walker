@@ -1,9 +1,6 @@
 // src/paint.js — the room's surfaces and the hand's skin, painted once at startup onto
-// canvases (no image files). Seeded noise, so the room is the same on every load. `paintStats.ms` is the
-// total time spent here.
+// canvases (no image files). Seeded noise, so the room is the same on every load.
 import * as THREE from 'three';
-
-export const paintStats = { ms: 0 };
 
 function rng(seed) {                  // mulberry32
   return () => {
@@ -15,12 +12,11 @@ function rng(seed) {                  // mulberry32
 }
 
 function tex(w, h, draw) {
-  const t0 = performance.now(), c = document.createElement('canvas');
+  const c = document.createElement('canvas');
   c.width = w; c.height = h;
   draw(c.getContext('2d'));
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
-  paintStats.ms += performance.now() - t0;
   return t;
 }
 const grad = (g, x0, y0, x1, y1, stops) => {

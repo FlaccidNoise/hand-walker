@@ -19,6 +19,7 @@
 //   1-9, 0           emotes
 import * as THREE from 'three';
 import * as C from './tuning.js';
+import { ZOOM_MIN } from './scene.js';
 
 // what a touch on the hand itself does, as plans: re-point the gesture names here
 const HAND = {
@@ -31,7 +32,7 @@ const FAR = 2.5;                    // u — clicks further than this scuttle
 const DOUBLE_CLICK = 350;           // ms
 const CARROT = 1.5;                 // u — keys aim a walk target this far ahead
 const KEY_REFRESH = 0.1;            // s between carrot updates while a direction is held
-export const EMOTE_KEYS = ['wave', 'yes', 'shake', 'idk', 'laugh', 'bow', 'thumbsUp', 'peace', 'snap', 'doubleSnap'];   // quick ones: the long perch `no` is in the palette
+const EMOTE_KEYS = ['wave', 'yes', 'shake', 'idk', 'laugh', 'bow', 'thumbsUp', 'peace', 'snap', 'doubleSnap'];   // quick ones: the long perch `no` is in the palette
 const POKE_R = 0.6;                 // u — a click this close to the hand's middle is a poke
 const NOTICE_AFTER = 1.6;           // s the cursor rests on the floor before the hand looks
 const COME_AFTER = 5;               // s more before it walks over
@@ -41,7 +42,6 @@ const PROP_PAD = TOUCH ? 22 : 8;    // px — a press this near a thing's middle
 const HAND_PAD = TOUCH ? 26 : 0;    // px — and this near the palm is a poke, however small the hand is drawn
 const SLOP = TOUCH ? 10 : 6;        // px a held pointer travels before it counts as moved
 const TAP_WAIT = 0.15;              // s a finger on the floor waits before it walks: it may be the first of a pinch
-const ZOOM_NEAR = 0.5;              // the nearest a pinch brings the view (scene.js ZOOM_MIN, the wheel's limit)
 const HOLD = 0.5;                   // s a still press on the hand before the high five
 const RUB_TURNS = 3, RUB_FOR = 1.2; // a pet: the pointer turns back on itself this often over the hand, inside this many s
 const PET_REST = 2.5;               // s before the next pet counts
@@ -191,7 +191,7 @@ export function initInput({ renderer, camera, view, controls, scene, rig, brain,
     if (d) { d.x = e.clientX; d.y = e.clientY; }
     if (pinch) {                                              // fingers apart: closer
       const [a, b] = [...down.values()];
-      if (b) view.zoom = THREE.MathUtils.clamp(pinch.zoom * pinch.d / (Math.hypot(a.x - b.x, a.y - b.y) || 1), ZOOM_NEAR, 1);
+      if (b) view.zoom = THREE.MathUtils.clamp(pinch.zoom * pinch.d / (Math.hypot(a.x - b.x, a.y - b.y) || 1), ZOOM_MIN, 1);
       return;
     }
     const grip = lead && e.pointerId === lead.id ? lead : press && e.pointerId === press.id ? press : null;

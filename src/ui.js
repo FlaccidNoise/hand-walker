@@ -30,12 +30,26 @@ const CAP_GAP = 14, CAP_EASE = 0.15;                          // px above the ha
 const STUMP = 0.3, PAD = 0.14;                                // u — the stump past the wrist joint · flesh past a fingertip joint
 
 export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
-  const cv = renderer.domElement, body = rig.mount.position;
+  const cv = renderer.domElement;
   cv.setAttribute('role', 'img');
   cv.setAttribute('aria-label', 'A hand walks around a small room. Use the buttons or the text box to direct it.');
   $('card').hidden = true;
   $('dock').inert = false;
-  const open = (el) => { if (!el.matches(':popover-open')) el.showPopover(); };
+  // no Popover API (Safari before 17, Firefox before 125): the panels are plain boxes, shut
+  // with `hidden`, and the ? and more… buttons toggle them
+  const native = !!HTMLElement.prototype.showPopover;
+  if (!native) {
+    Object.assign(HTMLElement.prototype, {
+      showPopover() { this.dispatchEvent(new Event('beforetoggle')); this.hidden = false; },
+      hidePopover() { this.hidden = true; },
+      togglePopover() { if (this.hidden) this.showPopover(); else this.hidePopover(); },
+    });
+    for (const el of document.querySelectorAll('[popover]')) el.hidden = true;
+    for (const b of document.querySelectorAll('[popovertarget]')) b.addEventListener('click', () => $(b.getAttribute('popovertarget')).togglePopover());
+  }
+  const open = (el) => { if (native ? !el.matches(':popover-open') : el.hidden) el.showPopover(); };
+  // a button pressed with the pointer gives the keys back: Space is jump again. A key press keeps its place
+  document.addEventListener('click', (e) => { if (e.detail) e.target.closest('button')?.blur(); });
 
   // ---- one door for text: the box, the cards, the palette and speech
   const pal = $('pal'), talkText = $('talkText');
@@ -49,7 +63,6 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     const b = e.target.closest('[data-say]');
     if (!b) return;
     ask(b.dataset.say);
-    if (e.detail) b.blur();                                  // a pointer press: Space is jump again. A key press keeps its place.
     if (box === pal) pal.hidePopover();
   });
   $('talk').addEventListener('submit', (e) => {
@@ -142,7 +155,7 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     if (!brain.rpsPick(sign)) return notice('Too late: it has thrown.');
     for (const b of rps.children) b.classList.toggle('on', b.dataset.pick === sign);
   };
-  rps.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) { pick(b.dataset.pick); if (e.detail) b.blur(); } });
+  rps.addEventListener('click', (e) => { const b = e.target.closest('[data-pick]'); if (b) pick(b.dataset.pick); });
 
   // ---- keys that belong to the page (driving keys live in src/input.js)
   let knockIn = dev || navigator.webdriver ? 0 : KNOCK_AFTER;  // a real visitor who only watches gets a knock
@@ -220,5 +233,5 @@ export function initUI({ renderer, camera, rig, sim, brain, dev = false }) {
     const y = THREE.MathUtils.clamp(capY, 12 + cap.offsetHeight, floor);
     cap.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) translate(-50%, -100%)`;
   }
-  return { update, cue, did, notice, caption };
+  return { update, cue, did };
 }

@@ -46,7 +46,6 @@ async function init() {
     rig = await buildRig('./assets/generic-hand-left.glb', C.HANDEDNESS);
   } catch (e) {
     console.error('rig load failed: check that assets/generic-hand-left.glb is served, then reload.', e);
-    state._rigErr = (e && (e.stack || e.message)) || String(e);
     window.__fatal('The hand did not load.');
     return;
   }
@@ -56,7 +55,6 @@ async function init() {
   const t0 = performance.now();
   const calib = calibrate(rig);
   calib.calibMs = performance.now() - t0;
-  window.__stand = calib;                                    // legacy probe handle
 
   const sim = makeSim(rig, calib);
   sim.reset();
