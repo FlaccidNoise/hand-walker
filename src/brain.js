@@ -85,7 +85,7 @@ export function makeBrain(sim, rig, camera, props = null) {
   // lowered front (the front is `h` long and shuts through whatever stands there)
   const inFront = () => { const k = box && box.solid, p = body.position; return !!k && p.x > k.x0 && p.x < k.x1 && p.z > k.z0 && p.z < k.z1 + k.h + 0.33; };
   const opening = () => boxOpen || pending('boxOpen') || pending('show');
-  const tidy = () => [...(inFront() ? [box.leave()[0]] : []), { do: 'wait', s: 0, fire: 'boxShut', box: true }];
+  const tidy = () => [...(inFront() ? [{ ...box.leave()[0], fire: pending('boxOpen') ? undefined : 'boxOpen' }] : []), { do: 'wait', s: 0, fire: 'boxShut', box: true }];   // emerging: the box opens on its own mark
   const settle = () => { if (st.i < 0 && st.status !== 'idle') setStatus('idle'); };   // no plan came of it: do not stay 'thinking'
 
   const ACTIONS = {
@@ -270,7 +270,7 @@ export function makeBrain(sim, rig, camera, props = null) {
       const only = (name) => plan.every(a => a.do === 'routine' && a.name === name);
       if (atHome()) {
         if (only('home')) return true;
-        plan = [{ do: 'routine', name: 'out' }, ...plan.filter(a => !boxy(a))];
+        plan = [{ do: 'routine', name: 'out' }, ...plan.filter(a => !boxy(a) && !a.box)];
       }
     }
     let noRoutine = null;

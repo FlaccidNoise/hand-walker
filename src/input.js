@@ -270,7 +270,7 @@ export function initInput({ renderer, camera, view, controls, scene, rig, brain,
   // cursor awareness: an idle hand looks at a cursor that rests on its floor, and
   // walks over if it stays. Runs as an `auto` command, so any real input replaces it.
   function notice(dt) {
-    if (!cur.on || cur.stage > 1 || !brain.idle || hover === 'hand') { if (!brain.idle) cur.still = 0; return; }   // (on the hand: that is its own business)
+    if (!cur.on || cur.stage > 1 || !brain.idle || !rig.mount.visible || hover === 'hand') { if (!brain.idle) cur.still = 0; return; }   // (on the hand: that is its own business)
     cur.still += dt;
     const dx = cur.x - body.x, dz = cur.z - body.z, d = Math.hypot(dx, dz);
     if (d < 1) return;                                        // on top of the hand: that is a poke, not a look
@@ -367,7 +367,7 @@ export function initInput({ renderer, camera, view, controls, scene, rig, brain,
       else if ((chase.n += dt) > 0.6 && Math.hypot(b.x - chase.x, b.z - chase.z) > 0.4) after();
     }
     notice(dt);
-    if (goneT >= 0 && (goneT += dt) > GONE_AFTER && (brain.idle || goneT > 4 * GONE_AFTER)) { goneT = -1; if (brain.idle) seek(); }   // once it is free, within reason
+    if (goneT >= 0 && (goneT += dt) > GONE_AFTER && (brain.idle || goneT > 4 * GONE_AFTER)) { goneT = -1; if (brain.idle && rig.mount.visible) seek(); }   // once it is free, within reason
     let dx = 0, dz = 0;
     for (const k of held) { dx += DIRS[k][0]; dz += DIRS[k][1]; }
     if (acting && !(brain.st.plan === acting && brain.st.i >= 0)) acting = null;

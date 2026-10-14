@@ -353,7 +353,7 @@ export function makeProps({ scene, lights }) {
   const fire = {
     switch() { state.lights = !state.lights; toggle.rotation.x = state.lights ? 0 : 0.5; SOUNDS.click(); onEvent?.(state.lights ? 'lightsOn' : 'lightsOff'); },
     bell() { state.ringT = 0; SOUNDS.ding(); onEvent?.('bell'); },
-    boxOpen() { box.lidT = box.flapT = 1; SOUNDS.click(); },
+    boxOpen() { if (box.lidT < 1 || box.flapT < 1) SOUNDS.click(); box.lidT = box.flapT = 1; },
     boxShut() { if (box.lidT || box.flapT) SOUNDS.knock(); box.lidT = box.flapT = 0; },
     boxCrack() { box.lidT = LID_CRACK; box.rattle = 0; SOUNDS.tick(); },
     boxLid() { box.lidT = 1; SOUNDS.click(); },
