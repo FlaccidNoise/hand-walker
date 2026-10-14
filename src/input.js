@@ -51,7 +51,7 @@ const THROW_T = 0.25;               // s — the shortest drag a throw's speed i
 const CHASE_AT = 1.5, CHASE_WAIT = 2; // the hand goes after a thrown ball once it rolls slower than this (u/s), or after this many s
 const GONE_AFTER = 2.5;             // s the mouse is off the page before the hand goes looking
 const AWAY = 20;                    // s a hidden tab counts as time away
-const VERB = { switch: 'flip', bell: 'ring', ball: 'kick', rug: 'nap', piano: 'play' };
+const VERB = { switch: 'flip', bell: 'ring', ball: 'kick', rug: 'nap', piano: 'play', box: 'go home' };
 const DIRS = { KeyW: [0, 1], ArrowUp: [0, 1], KeyS: [0, -1], ArrowDown: [0, -1],
   KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
 
